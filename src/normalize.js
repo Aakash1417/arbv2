@@ -93,8 +93,27 @@ const SIDE = (s) => {
   return null;
 };
 
+/**
+ * Strip season/split decoration from a league name so the same competition
+ * matches across books: "LPL Split 3" and "LEC Summer" reduce to LPL and LEC.
+ *
+ * Deliberately not aggressive enough to collapse "LCK CL" into "LCK" — the
+ * Challengers League is a different competition.
+ */
+function canonicalLeague(name) {
+  const bare = String(name || '')
+    .replace(/^LOL\s*-\s*/i, '')
+    .replace(/\b(split|summer|spring|winter|season|20\d\d|\d+)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  // Books name the same competition differently; fold those onto one key.
+  return require('./leagues').resolveKey(bare) || bare;
+}
+
 module.exports = {
   strip,
+  canonicalLeague,
   normalizeTeam,
   normalizePlayer,
   teamsMatch,

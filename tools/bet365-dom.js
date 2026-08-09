@@ -20,35 +20,64 @@
  * drops rows whose columns disagree in length.
  */
 
-/** Fixtures on a competition (coupon) page, with their league headings. */
+/**
+ * Fixtures on a competition (coupon) page, grouped by league.
+ *
+ * The page nests every league in its own `src-CompetitionMarketGroup`, holding
+ * the league heading and that league's fixtures. Reading each container and
+ * taking the fixtures *inside* it is what keeps the league attribution right —
+ * an earlier version walked a flat node list tracking "the most recent
+ * heading", which mis-assigned leagues whenever headings and fixtures were not
+ * interleaved in document order.
+ *
+ * `index` is the fixture's position in the whole-document list, because that is
+ * what the scraper re-queries when it clicks a row.
+ */
 function readCoupon() {
   const t = (e) => ((e && e.innerText) || '').trim();
-  const nodes = [...document.querySelectorAll(
-    '[class*="CompetitionMarketGroupButton_Title"],[class*="MarketGroupButton_Text"],' +
-    '[class*="CouponHeader"],.ses-ParticipantFixtureDetailsEsports_TeamNames',
-  )];
+  const FIX = '.ses-ParticipantFixtureDetailsEsports_TeamNames';
+  const all = [...document.querySelectorAll(FIX)];
+  const indexOf = new Map(all.map((el, i) => [el, i]));
+
+  /** Kickoff time for one fixture row, never a neighbour's. */
+  const timeFor = (el) => {
+    let p = el.parentElement;
+    for (let up = 0; up < 6 && p; up++) {
+      // Stop as soon as the ancestor covers more than this one fixture.
+      if (p.querySelectorAll(FIX).length !== 1) break;
+      const hit = p.querySelector('[class*="BookCloses"]');
+      if (hit) return t(hit);
+      p = p.parentElement;
+    }
+    return '';
+  };
 
   const fixtures = [];
-  let league = '';
-  let index = 0;
-  for (const n of nodes) {
-    const cls = String(n.className || '');
-    if (/TeamNames/.test(cls)) {
-      const names = t(n).split('\n').map((s) => s.trim()).filter(Boolean);
-      const box = n.closest('[class*="ParticipantFixtureDetails"]') || n;
+  const groups = [...document.querySelectorAll('[class*="CompetitionMarketGroup"]')]
+    .filter((g) => g.querySelector(FIX));
+
+  for (const g of groups) {
+    const league = t(g.querySelector(
+      '[class*="CompetitionMarketGroupButton_Title"],[class*="GroupButton_Title"],[class*="GroupButton_Text"]',
+    )).split('\n')[0];
+    if (!league) continue;   // a nested wrapper, not the league container
+    for (const el of g.querySelectorAll(FIX)) {
+      if (!indexOf.has(el)) continue;
+      const names = t(el).split('\n').map((s) => s.trim()).filter(Boolean);
       fixtures.push({
-        index: index++,
+        index: indexOf.get(el),
         league,
         home: names[0] || '',
         away: names[1] || '',
-        time: t(box.querySelector('[class*="BookCloses"]')),
+        time: timeFor(el),
       });
-    } else {
-      const s = t(n);
-      if (s) league = s.split('\n')[0];
     }
   }
-  return { url: location.href, fixtures };
+
+  // One row per fixture even if it appears in several nested containers.
+  const seen = new Set();
+  const unique = fixtures.filter((f) => !seen.has(f.index) && seen.add(f.index));
+  return { url: location.href, fixtures: unique, leagues: [...new Set(unique.map((f) => f.league))] };
 }
 
 /** Names of the market-group tabs ("Main Markets", "Player", "Map 1", …). */

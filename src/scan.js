@@ -4,6 +4,7 @@ const { BOOKS, enabledBooks } = require('./books');
 const { clusterEvents, groupMarkets } = require('./match');
 const { findArbs, dedupeBest } = require('./arb');
 const { FAMILIES } = require('./markets');
+const { DEFAULT_KEYS, betwaySlugs } = require('./leagues');
 
 const HOUR = 3600e3;
 
@@ -17,7 +18,7 @@ const HOUR = 3600e3;
  */
 async function scan(opts = {}) {
   const {
-    leagues = ['LPL', 'LCK', 'LCS'],
+    leagues = DEFAULT_KEYS,
     hours = 24,
     minRoi = 0,
     bankroll = 100,
@@ -39,7 +40,8 @@ async function scan(opts = {}) {
   const results = await Promise.all(active.map(async (b) => {
     try {
       const out = await b.mod.collect({
-        leagues: b.id === 'betway' ? leagues.map((l) => l.toLowerCase()) : leagues,
+        // Betway is queried by group slug; the rest filter by league name.
+        leagues: b.id === 'betway' ? betwaySlugs(leagues) : leagues,
         withinMs,
         onWarn,
       });

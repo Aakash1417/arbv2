@@ -33,14 +33,31 @@ node find-arbs.js --list-markets         # what can be compared
 node find-arbs.js --list-books           # books and their status
 node find-arbs.js --books betway,bet99   # restrict to specific books
 node find-arbs.js --hours 6              # only fixtures starting soon
-node find-arbs.js --min-roi 1            # only edges of 1% or better
-node find-arbs.js --leagues LPL,LCK,LCS,LEC
+node find-arbs.js --min-roi 0            # show every edge (default floor is 2%)
+node find-arbs.js --leagues LPL,LCK      # restrict to specific leagues
 node find-arbs.js --bankroll 500         # size the worked stake example
 node find-arbs.js --watch 60             # rescan every 60s
 node find-arbs.js --json out.json -v     # dump raw results + diagnostics
 node tools/bet365-scrape.js              # refresh the bet365 snapshot
-npm test                                 # 53 unit tests over the math + parsers
+npm test                                 # 55 unit tests over the math + parsers
 ```
+
+## Leagues
+
+Eleven competitions are tracked, listed in `src/leagues.js`:
+
+`LPL` · `LCK` · `LCS` · `LEC` · `LCP` · `CBLOL` · `LCK CL` · `LES` · `LRN` ·
+`LRS` · `PRIME LEAGUE`
+
+Books disagree on naming in two ways, and both are reconciled there: season
+decoration (`LPL Split 3`, `LEC Summer`) is stripped, and different names for
+the same competition are aliased onto one key — BET99's
+`LCK Challengers League` is Betway's and Ozoon's `LCK CL`. `LCK CL` is
+deliberately *not* folded into `LCK`; they are different competitions.
+
+Betway is queried by group slug (`lck-cl`, `prime-league`), the other books by
+league name, so the registry holds both. Competitions only one book prices are
+left out — they can never produce a cross-book arb.
 
 ## Markets compared
 
@@ -72,9 +89,13 @@ BET99 the two are worded identically — only the market `type` (`TEAMTKOU` vs
 buries towers, dragons and barons inside a single "Map Totals" market whose
 family is decided per outcome.
 
-Player props only appear roughly **2–3 hours before a match**, so an empty scan
-usually just means nothing is priced yet. Run with `--watch` to catch them as
-they open.
+Player props only appear roughly **2–3 hours before a match** (about a day out
+on bet365), so an empty scan usually just means nothing is priced yet. Run with
+`--watch` to catch them as they open.
+
+Output is filtered to edges of **2% or better** by default, since thinner ones
+rarely survive the time it takes to place both legs. `--min-roi 0` shows
+everything.
 
 ## What it reports
 

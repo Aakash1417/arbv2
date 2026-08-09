@@ -22,7 +22,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { normalizeTeam, normalizePlayer } = require('../normalize');
+const { normalizeTeam, normalizePlayer, canonicalLeague } = require('../normalize');
+const { DEFAULT_KEYS } = require('../leagues');
 const { FAMILIES } = require('../markets');
 
 const SNAPSHOT = path.join(__dirname, '..', '..', 'data', 'bet365.json');
@@ -147,7 +148,7 @@ function extractEvent(ev, { now = Date.now() } = {}) {
     book: 'bet365',
     id: String(ev.url || `${ev.home}|${ev.away}`),
     name: `${ev.home} vs ${ev.away}`,
-    league: String(ev.league || '').replace(/^LOL\s*-\s*/i, '').trim(),
+    league: canonicalLeague(ev.league),
     home: ev.home,
     away: ev.away,
     homeKey: normalizeTeam(ev.home),
@@ -277,7 +278,7 @@ function readSnapshot(file = SNAPSHOT) {
  * @param {number} opts.maxAgeMs reject snapshots older than this
  */
 async function collect({
-  leagues = ['LPL', 'LCK', 'LCS'],
+  leagues = DEFAULT_KEYS,
   withinMs = 24 * 3600e3,
   maxAgeMs = DEFAULT_MAX_AGE_MS,
   file = SNAPSHOT,

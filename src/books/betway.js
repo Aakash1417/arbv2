@@ -13,7 +13,7 @@
 
 const { randomUUID } = require('crypto');
 const { postJson, mapLimit } = require('../http');
-const { normalizeTeam, normalizePlayer, canonicalStat, SIDE } = require('../normalize');
+const { normalizeTeam, normalizePlayer, canonicalStat, canonicalLeague, SIDE } = require('../normalize');
 const { FAMILIES, isLineFamily, isMarginFamily } = require('../markets');
 
 const API = 'https://betway.com/g/api/sports';
@@ -41,7 +41,7 @@ const marketUrl = (id, groupCName) =>
   groupCName ? `${eventUrl(id)}?marketGroup=${groupCName}` : eventUrl(id);
 
 /** League slugs as they appear in the /grp/esports/league-of-legends/<slug> URLs. */
-const DEFAULT_LEAGUES = ['lpl', 'lck', 'lcs'];
+const DEFAULT_LEAGUES = require('../leagues').betwaySlugs();
 
 async function listEvents(leagueSlug) {
   const data = await postJson(
@@ -197,7 +197,7 @@ function extractProps(detail) {
     book: 'betway',
     id: String(ev.Id),
     name: ev.EventName || `${ev.HomeTeamName} - ${ev.AwayTeamName}`,
-    league: ev.GroupName,
+    league: canonicalLeague(ev.GroupName),
     home: ev.HomeTeamName,
     away: ev.AwayTeamName,
     homeKey: normalizeTeam(ev.HomeTeamName),

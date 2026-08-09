@@ -17,24 +17,14 @@
  */
 
 const feed = require('./ozoon-feed');
-const { normalizeTeam, normalizePlayer } = require('../normalize');
+const { normalizeTeam, normalizePlayer, canonicalLeague } = require('../normalize');
+const { DEFAULT_KEYS } = require('../leagues');
 const { FAMILIES, isMarginFamily } = require('../markets');
 
 const SITE = 'https://www.ozoon.eu/sports';
 
 const eventUrl = (link) => `${SITE}${link}`;
 
-/**
- * Strip season/split decoration so "LPL Split 3" matches a request for "LPL",
- * while "LCK CL" stays distinct from "LCK" — they are different competitions.
- */
-function canonicalLeague(description) {
-  return String(description || '')
-    .replace(/\b(split|summer|spring|winter|season|20\d\d|\d+)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
-}
 
 /** Ozoon periods: "Game" is the whole series, "Map N" a single map. */
 function periodScope(period) {
@@ -188,7 +178,7 @@ function extractProps(raw, league) {
     book: 'ozoon',
     id: String(raw.id),
     name: raw.description,
-    league: league || '',
+    league: canonicalLeague(league),
     home: home.name,
     away: away.name,
     homeKey: normalizeTeam(home.name),
@@ -268,7 +258,7 @@ async function listEvents({ onWarn } = {}) {
  * fixture subscription are fired together, then the feed is read until quiet.
  */
 async function collect({
-  leagues = ['LPL', 'LCK', 'LCS'],
+  leagues = DEFAULT_KEYS,
   withinMs = 24 * 3600e3,
   onWarn,
 } = {}) {

@@ -16,12 +16,13 @@ const { scan } = require('./src/scan');
 const { FAMILIES } = require('./src/markets');
 const { marketLabel } = require('./src/arb');
 const { BOOKS } = require('./src/books');
+const { DEFAULT_KEYS } = require('./src/leagues');
 
 function parseArgs(argv) {
   const o = {
-    leagues: ['LPL', 'LCK', 'LCS'],
+    leagues: DEFAULT_KEYS,
     hours: 24,
-    minRoi: 0,
+    minRoi: 0.02,
     bankroll: 100,
     crossBookOnly: true,
     families: null,
@@ -62,9 +63,9 @@ function parseArgs(argv) {
 const HELP = `
 LoL arbitrage scanner — Betway vs BET99
 
-  --leagues LPL,LCK,LCS   leagues to scan            (default LPL,LCK,LCS)
+  --leagues LPL,LCK       leagues to scan            (default: all tracked)
   --hours N               only events starting within N hours (default 24)
-  --min-roi P             minimum edge in percent    (default 0)
+  --min-roi P             minimum edge in percent    (default 2; use 0 for all)
   --bankroll N            total stake for the worked example (default 100)
   --players               player props only
   --markets a,b,c         restrict to these market families
@@ -97,6 +98,11 @@ function render(result, opts) {
   for (const b of result.books.filter((x) => !x.active && x.status)) {
     console.log(`\n  ${b.id} unavailable — ${b.status.reason}`);
   }
+
+  // A book that contributed nothing is indistinguishable from a book with no
+  // markets, so always say so — the reason is in the warnings below.
+  const empty = result.books.filter((b) => b.active && !b.quotes).map((b) => b.id);
+  if (empty.length) console.log(`\n  contributed nothing: ${empty.join(', ')}`);
 
   if (opts.verbose) {
     for (const f of result.fixtures) {
@@ -148,7 +154,9 @@ async function once(opts) {
   const result = await scan({ ...opts, onWarn: (m) => warnings.push(m) });
   console.log(`[${new Date().toISOString()}] scan complete`);
   render(result, opts);
-  if (opts.verbose && warnings.length) {
+  // Always shown: every warning means a book is missing data, which silently
+  // changes what the scan can find.
+  if (warnings.length) {
     console.log('warnings:');
     warnings.forEach((w) => console.log('  !', w));
   }

@@ -14,6 +14,8 @@ const { BOOKS } = require('../src/books');
 const { normalizePlayer, normalizeTeam, playersMatch, teamsMatch } = require('../src/normalize');
 const { toAmerican, formatAmerican, fromAmerican } = require('../src/odds');
 const { toThreshold } = require('../src/markets');
+const { canonicalLeague } = require('../src/normalize');
+const { betwaySlugs, DEFAULT_KEYS } = require('../src/leagues');
 
 const EVENT = { home: 'JD Gaming', away: 'Edward Gaming', league: 'LPL', name: 'JD - EDG' };
 const CANON = { homeKey: 'jd', awayKey: 'edward' };
@@ -672,4 +674,30 @@ test('market labels read sensibly', () => {
     'Burdol Player Total Kills · Map 2');
   assert.equal(marketLabel({ family: 'match_winner', scope: 0, subject: null }),
     'Match Winner · Series');
+});
+
+// ------------------------------------------------------------- leagues
+
+test('league names from every book fold onto one key', () => {
+  // BET99 spells out the Challengers League; Betway and Ozoon abbreviate it.
+  assert.equal(canonicalLeague('LCK CHALLENGERS LEAGUE'), 'LCK CL');
+  assert.equal(canonicalLeague('LOL - LCK CL'), 'LCK CL');
+  assert.equal(canonicalLeague('PRIME LEAGUE 1ST DIVISION'), 'PRIME LEAGUE');
+  // Season decoration still comes off.
+  assert.equal(canonicalLeague('LOL - LEC Summer'), 'LEC');
+  assert.equal(canonicalLeague('LPL Split 3'), 'LPL');
+  assert.equal(canonicalLeague('CBLOL Split 2'), 'CBLOL');
+  // The Challengers League must not collapse into the LCK proper.
+  assert.notEqual(canonicalLeague('LCK CL'), 'LCK');
+  // Untracked competitions pass through rather than being forced onto a key.
+  assert.equal(canonicalLeague('KESPA CUP'), 'KESPA CUP');
+});
+
+test('betway is queried by slug, other books by league key', () => {
+  assert.deepEqual(betwaySlugs(['LCK CL', 'PRIME LEAGUE', 'LEC']),
+    ['lck-cl', 'prime-league', 'lec']);
+  // An unknown key yields no slug rather than a bogus request.
+  assert.deepEqual(betwaySlugs(['NOT A LEAGUE']), []);
+  assert.ok(DEFAULT_KEYS.includes('LPL') && DEFAULT_KEYS.includes('LCK CL'));
+  assert.equal(betwaySlugs().length, DEFAULT_KEYS.length);
 });

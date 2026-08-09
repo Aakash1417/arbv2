@@ -13,7 +13,8 @@
  */
 
 const { postJson, mapLimit } = require('../http');
-const { normalizeTeam, normalizePlayer } = require('../normalize');
+const { normalizeTeam, normalizePlayer, canonicalLeague } = require('../normalize');
+const { DEFAULT_KEYS } = require('../leagues');
 const { FAMILIES, isMarginFamily } = require('../markets');
 
 const ENDPOINT = 'https://bet99.com/java-graphql/graphql';
@@ -240,7 +241,7 @@ function extractProps(evt, leagues) {
     book: 'bet99',
     id: String(evt.id),
     name: evt.name,
-    league: meta?.league || evt.compName,
+    league: canonicalLeague(meta?.league || evt.compName),
     competition: evt.compName,
     home: home?.name || '',
     away: away?.name || '',
@@ -300,7 +301,7 @@ const subjectKey = (family, subject) => {
  * @param {number} opts.withinMs only events starting within this window
  */
 async function collect({
-  leagues = ['LPL', 'LCK', 'LCS'],
+  leagues = DEFAULT_KEYS,
   withinMs = 24 * 3600e3,
   batchSize = 6,
   concurrency = 3,
@@ -320,7 +321,7 @@ async function collect({
     if (!(t > now - 3600e3 && t < now + withinMs)) return false;
     if (!wanted) return true;
     const league = byCompId.get(String(e.compId))?.league || e.compName || '';
-    return wanted.has(league.toUpperCase());
+    return wanted.has(canonicalLeague(league));
   });
 
   const batches = [];
