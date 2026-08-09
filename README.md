@@ -5,18 +5,19 @@ markets — by comparing sportsbooks against each other.
 
 | book | status |
 | --- | --- |
-| Betway (en-CA) | working |
-| BET99 | working |
-| Ozoon | working |
-| bet365 | **blocked** — see [bet365](#bet365) |
+| Betway (en-CA) | working — direct |
+| BET99 | working — direct |
+| Ozoon | working — direct |
+| bet365 | working — Selenium scrape, incl. **player props** (see [bet365](#bet365)) |
 
 The pipeline is N-book: fixtures cluster across any number of books and a market
 is comparable as soon as two of them price it — including fixtures or markets
 the first book doesn't carry.
 
-No dependencies, no browser, no login — the working books expose their prices
-over plain public endpoints. Node 18+ (Ozoon needs Node 22's built-in
-`WebSocket`, or Node 18/20 run with `--experimental-websocket`).
+Three books expose their prices over plain public endpoints and need nothing
+installed. bet365 has no usable API and is scraped with Selenium into a
+snapshot the scan reads. Node 18+ (Ozoon needs Node 22's built-in `WebSocket`,
+or Node 18/20 run with `--experimental-websocket`).
 
 ```bash
 node find-arbs.js
@@ -37,7 +38,8 @@ node find-arbs.js --leagues LPL,LCK,LCS,LEC
 node find-arbs.js --bankroll 500         # size the worked stake example
 node find-arbs.js --watch 60             # rescan every 60s
 node find-arbs.js --json out.json -v     # dump raw results + diagnostics
-npm test                                 # 45 unit tests over the math + parsers
+node tools/bet365-scrape.js              # refresh the bet365 snapshot
+npm test                                 # 53 unit tests over the math + parsers
 ```
 
 ## Markets compared
@@ -52,9 +54,9 @@ npm test                                 # 45 unit tests over the math + parsers
 | `map_kills_odd_even`, `race_to_10_kills` | per map | categorical |
 | `map_total_kills`, `map_total_barons` | per map | line |
 | `map_total_towers`, `map_total_dragons` | per map | line |
-| `map_kills_handicap` | per map | line |
+| `map_kills_handicap`, `map_towers_handicap`, `map_dragons_handicap` | per map | line |
 | `team_total_kills` | per map, per team | line |
-| `player_kills` | per map, per player | line |
+| `player_kills`, `player_deaths`, `player_assists` | per map, per player | line |
 
 A market needs only **two** books, not all of them — `map_total_towers` and
 `map_total_dragons` pair BET99 against Ozoon with Betway absent, and
@@ -123,8 +125,9 @@ The JSON dump (`--json`) carries both formats: `legs.over.odds` is decimal,
 
 ## How the data is obtained
 
-Each book was reverse-engineered from its own front-end; the endpoints
-below are public and unauthenticated.
+The three direct books were reverse-engineered from their own front-ends; those
+endpoints are public and unauthenticated. bet365 has no usable API and is
+scraped from the rendered site instead.
 
 ### Betway — `src/books/betway.js`
 
@@ -193,50 +196,58 @@ League names carry season decoration (`LPL Split 3`, `LCS Summer`) which is
 stripped for matching — but not so far that `LCK CL` collapses into `LCK`, since
 those are different competitions.
 
-### bet365
+### bet365 — `tools/bet365-scrape.js` + `src/books/bet365.js`
 
-**Odds cannot be retrieved.** bet365's origin answers `200 OK` with a zero-byte
-body for every odds endpoint when the session is automated. Static content still
-arrives only because Cloudflare serves it from a shared public cache, and the
-response headers make the split explicit:
+bet365 has **no usable API**. Its origin answers `200 OK` with a zero-byte body
+for every odds endpoint under automation; the only content that arrives comes
+from Cloudflare's shared cache, and the headers make the split obvious:
 
 ```
 /leftnavcontentapi/allsportsmenu   200   12278 bytes   cf-cache-status: HIT
 /splashcontentapi/splash           200       0 bytes   cf-cache-status: DYNAMIC
 ```
 
-Everything that actually reaches bet365 comes back empty — which is also why
-their own site sits on a loading spinner forever under automation. Confirmed
-identically across:
+What *does* work is **a visible Chrome driven by Selenium**. The site renders
+normally there and the DOM can be read directly. Three quirks shape the scraper:
 
-- plain HTTP (Cloudflare 403 before it even reaches the app)
-- headless Chromium
-- real Chrome, headful, with a persistent profile
-- CDP attach to a Chrome that automation did not launch
-- both `www.bet365.com` and `www.on.bet365.ca`
+- **Headless is refused.** Measured: `--headless=new` and the old mode both sit
+  at a 687-byte shell with zero fixtures for 100s+, and a reload does not rescue
+  it. Headed gets all 48 fixtures in ~25s. This is the same wall Playwright hits.
+  `--headless` is kept only so the claim can be re-checked.
+- **Navigation needs an explicit reload.** Every route is a hash change, which
+  the browser treats as same-document — the URL updates but nothing repaints,
+  and `driver.get()` on a hash-only difference is a no-op. Click (or `get`) to
+  set the hash, then `refresh()`. That one call is the difference between a
+  blank page and a full market book.
+- **Player props sit behind a "Player" tab** (route suffix `/I11/`) — same
+  click-then-refresh dance.
 
-Getting past this means browser-fingerprint evasion, which this tool does not
-do. `bet365.collect()` therefore returns nothing and states the reason rather
-than failing silently or inventing prices, and the book ships `enabled: false`.
+Because a click never unloads the coupon document, `back()` restores it
+instantly, so every fixture's route is harvested in one pass (~3.5s each) before
+any event page is loaded.
 
-What *is* built and tested, so the book is ready if a data path appears
-(a feed you subscribe to, an odds API, or a session you supply yourself):
+Scraping is ~35s per fixture, so it runs separately and writes
+`data/bet365.json`; the scan just reads that snapshot and ignores it once it is
+older than two hours. **Leave the browser window alone while it runs.**
 
-- `src/books/bet365-format.js` — their pipe/semicolon wire format, fractional
-  odds (`5/2`, `EVS`) → decimal, and `#AC#B151#C1#D50#E3#F163#` route parsing.
-  Validated against real captured payloads.
-- `src/books/bet365.js` — the endpoint map lifted from their own routing
-  manifest (`/othersportsmatchmarketscontentapi/list` is the one serving the
-  `B151…D50` LoL route, and `/playercontentapi/playerprops` the player props),
-  plus a `probe()` that re-checks whether the block still stands.
+```bash
+node tools/bet365-scrape.js --hours 24
+```
 
-The market classification is deliberately **not** written: no bet365 LoL market
-payload was ever obtainable, and inventing a mapping for markets nobody has seen
-would be guesswork. Capture one real payload and it slots into the same
-`FAMILIES` taxonomy the other two books use.
+**LPL is skipped** — bet365 prices no LoL player props for it. Fixtures inside
+about a day carry `Map N - Player Total Kills / Deaths / Assists` (a recent run:
+4 of 6 fixtures, the two without being further out), plus match lines, per-map
+winners, kill/tower/dragon handicaps, map totals and
+first-blood/baron/inhibitor.
 
-If either book changes shape, `playwright` is kept as a devDependency so you can
-re-sniff the front-end's own network traffic.
+bet365 renders markets as a **grid**: one column holds the row labels (player or
+team names) and the remaining columns hold prices, aligned to those labels *by
+index*. All the mapping is therefore index alignment, and a column whose length
+disagrees with the labels is dropped rather than zipped — a shifted grid would
+otherwise hand one player another player's price.
+
+Player matchups (`Siwoo v PerfecT`), rift-herald and tower-destroy markets are
+left unmapped: no other book prices them.
 
 ## Layout
 
@@ -250,8 +261,9 @@ re-sniff the front-end's own network traffic.
 | `src/books/bet99.js` | BET99 GraphQL client + market classification |
 | `src/books/ozoon.js` | Ozoon market classification |
 | `src/books/ozoon-feed.js` | Ozoon WebSocket feed client |
-| `src/books/bet365.js` | bet365 endpoints + block status (disabled) |
-| `src/books/bet365-format.js` | bet365 wire-format / odds / route parsing |
+| `src/books/bet365.js` | normalises the bet365 snapshot, with a staleness guard |
+| `tools/bet365-scrape.js` | Selenium collector -> `data/bet365.json` |
+| `tools/bet365-dom.js` | browser-side extraction for bet365's market grid |
 | `src/match.js` | clusters fixtures across books, resolves them into one home/away frame, groups markets |
 | `src/arb.js` | arb/middle detection and stake sizing |
 
@@ -276,9 +288,15 @@ outcomes are resolved onto it by team name.
   **suspended** until the series is under way, so pre-match only Map 1 is
   actually priced on both books. Suspended markets are dropped, which is why
   scans read `Map 1` throughout; Maps 2–3 start matching once they open.
-- Fixtures are paired on normalised team names plus a ±3h start-time window, and
-  players on their handle with any real-name parenthetical stripped
-  (`Ahn (An Shan-Ye)` ↔ `Ahn`). Unmatched names are skipped rather than guessed.
+- Fixtures are paired on normalised team names plus a ±3h start-time window.
+  Team names match on whole tokens, never as raw substrings — `Team WE` ("we")
+  and `Weibo Gaming` ("weibo") are different LPL orgs.
+- **Player handles must match exactly** once normalised. LPL fields both a
+  `Wei` and a `Weiwei` in the same fixture, and any prefix rule pairs one
+  player's Over with the other's Under and reports a large phantom arb. The only
+  decoration books actually add is a real name in parentheses
+  (`Ahn (An Shan-Ye)` ↔ `Ahn`), which is stripped before comparison, so exact
+  matching loses nothing real. Unmatched handles are skipped, not guessed.
 - Betway's orientation is the canonical home/away frame for a fixture; BET99's
   outcomes are resolved onto it **by team name**, not by position, so a book
   that lists the teams the other way round still lines up. A team name that

@@ -7,12 +7,11 @@ const { findArbs, stakes, invSum, marketLabel } = require('../src/arb');
 const betway = require('../src/books/betway');
 const bet99 = require('../src/books/bet99');
 const { clusterEvents, groupMarkets, resolveQuote, sideOf } = require('../src/match');
-const fmt = require('../src/books/bet365-format');
 const bet365 = require('../src/books/bet365');
 const ozoon = require('../src/books/ozoon');
 const feed = require('../src/books/ozoon-feed');
 const { BOOKS } = require('../src/books');
-const { normalizePlayer, normalizeTeam, playersMatch } = require('../src/normalize');
+const { normalizePlayer, normalizeTeam, playersMatch, teamsMatch } = require('../src/normalize');
 const { toAmerican, formatAmerican, fromAmerican } = require('../src/odds');
 const { toThreshold } = require('../src/markets');
 
@@ -250,8 +249,50 @@ test('bet99 types classify into the same families', () => {
 test('player handles normalise across the two books', () => {
   assert.equal(normalizePlayer('Ahn (An Shan-Ye)'), 'ahn');
   assert.ok(playersMatch(normalizePlayer('Ahn (An Shan-Ye)'), normalizePlayer('Ahn')));
+  assert.ok(playersMatch(normalizePlayer('sheer'), normalizePlayer('Sheer')));
+  assert.ok(playersMatch(normalizePlayer('Wenbo (Yang Wen-Bo)'), normalizePlayer('Wenbo')));
   assert.ok(!playersMatch('ahn', 'bin'));
   assert.equal(normalizeTeam('LGD Gaming'), 'lgd');
+});
+
+test('a player handle is never matched to a longer one', () => {
+  // Invictus Gaming and LNG both field a "Wei" and a "Weiwei". A prefix rule
+  // pairs one player's Over with the other's Under and invents a huge arb.
+  assert.ok(!playersMatch('wei', 'weiwei'));
+  assert.ok(!playersMatch('weiwei', 'wei'));
+  assert.ok(playersMatch('wei', 'wei'));
+});
+
+test('team names are not matched as raw substrings', () => {
+  // "Team WE" -> "we" and "Weibo Gaming" -> "weibo" are different LPL orgs.
+  assert.ok(!teamsMatch(normalizeTeam('Team WE'), normalizeTeam('Weibo Gaming')));
+  // Qualified names still pair on their shared token.
+  assert.ok(teamsMatch(normalizeTeam('FearX'), normalizeTeam('Bnk Fearx')));
+  assert.ok(teamsMatch(normalizeTeam('DRX'), normalizeTeam('Kiwoom DRX')));
+  assert.ok(teamsMatch(normalizeTeam('Top'), normalizeTeam('Top Esports')));
+  assert.ok(!teamsMatch(normalizeTeam('Gen.G'), normalizeTeam('G2 Esports')));
+});
+
+test('same-named-prefix players stay in separate markets', () => {
+  const pq = (book, subject, side, line, odds) => ({
+    book, eventId: 'e', family: 'player_kills', scope: 1,
+    subject, subjectKey: normalizePlayer(subject),
+    side, line, odds, marketTitle: 'm', url: 'u', ref: {},
+  });
+  const groups = groupMarkets([
+    [pq('betway', 'Weiwei', 'over', 3.5, 3.2), pq('betway', 'Wei', 'over', 3.5, 1.65)],
+    [pq('bet99', 'Wei', 'under', 3.5, 2.05)],
+  ], CANON);
+
+  const weiwei = groups.find((g) => g.subjectKey === 'weiwei');
+  const wei = groups.find((g) => g.subjectKey === 'wei');
+  // Weiwei is Betway-only here, so it cannot be arbed at all.
+  assert.equal(weiwei, undefined);
+  assert.equal(wei.legs.length, 2);
+  assert.ok(wei.legs.every((l) => l.subjectKey === 'wei'));
+  // The old prefix rule produced 3.20 over vs 2.05 under -> a fake 24.95%.
+  const arbs = findArbs(wei, EVENT);
+  assert.equal(arbs.length, 0);
 });
 
 const ev = (book, id, homeKey, awayKey, startTime) =>
@@ -517,47 +558,111 @@ test('ozoon builds feed subscription paths', () => {
 
 // ------------------------------------------------------------- bet365
 
-test('bet365 wire format parses into typed records', () => {
-  // A real leftnavcontentapi payload, trimmed.
-  const payload = 'F|CS;IT=LN-HL1;SY=Sports;NA=Sports;|CL;ID=-5;NA=Promos;PD=#OF#;AE=1;'
-    + '|CL;ID=151;IT=LN-CL151;NA=Esports;N2=Esports;PD=#AS#B151#;CS=1;';
-  const recs = fmt.parseRecords(payload);
-  // The leading bare "F" marker carries no fields and is dropped.
-  assert.equal(recs.length, 3);
-  assert.equal(recs[0]._type, 'CS');
-  assert.equal(recs[2]._type, 'CL');
-  assert.equal(recs[2].NA, 'Esports');
-  assert.equal(recs[2].PD, '#AS#B151#');
-  assert.equal(fmt.findNavEntry(recs, /esports/i).ID, '151');
-  assert.equal(fmt.findNavEntry(recs, /cricket/i), null);
+test('bet365 group titles classify', () => {
+  const c = bet365.classifyGroup;
+  assert.deepEqual(c('Map 1 - Player Total Kills'),
+    { kind: 'player', scope: 1, family: 'player_kills' });
+  assert.deepEqual(c('Map 2 - Player Total Assists'),
+    { kind: 'player', scope: 2, family: 'player_assists' });
+  assert.deepEqual(c('Map 1 Winner'), { kind: 'teamCells', scope: 1, family: 'map_winner' });
+  assert.deepEqual(c('Map 1 - Tower Handicap'),
+    { kind: 'teamCols', scope: 1, family: 'map_towers_handicap' });
+  assert.deepEqual(c('Match Lines'), { kind: 'rows', scope: 0 });
+  assert.deepEqual(c('Map 1 - Totals'), { kind: 'rows', scope: 1 });
+  // Player matchups are head-to-head pairs no other book prices.
+  assert.equal(c('Map 1 - Player Matchups - Most Kills'), null);
 });
 
-test('bet365 fractional odds convert to decimal', () => {
-  assert.equal(fmt.fractionToDecimal('5/2'), 3.5);
-  assert.equal(fmt.fractionToDecimal('10/11'), 1 + 10 / 11);
-  assert.equal(fmt.fractionToDecimal('EVS'), 2);
-  assert.equal(fmt.fractionToDecimal('1/0'), null);
-  assert.equal(fmt.fractionToDecimal(''), null);
+test('bet365 fixture times parse from Pacific into UTC', () => {
+  const now = new Date('2026-08-09T00:00:00Z');
+  // The site prints its own Pacific clock; this fixture is 08:00Z.
+  assert.equal(bet365.parseHeaderTime('LOL - LCK | Aug 9 1:00 AM | Dplus KIA vs KT Rolster', now),
+    Date.parse('2026-08-09T08:00:00Z'));
+  assert.equal(bet365.parseHeaderTime('LOL - LCK | Aug 9 3:00 AM | BNK FearX vs Kiwoom DRX', now),
+    Date.parse('2026-08-09T10:00:00Z'));
+  assert.equal(bet365.parseHeaderTime('no time here', now), null);
 });
 
-test('bet365 routes parse and rebuild', () => {
-  // The LoL competition route this was built against.
-  assert.deepEqual(fmt.parseRoute('#AC#B151#C1#D50#E3#F163#'),
-    { A: 'C', B: '151', C: '1', D: '50', E: '3', F: '163' });
-  assert.equal(fmt.buildRoute({ A: 'S', B: '151' }), '#AS#B151#');
+const b365Event = (groups) => ({
+  league: 'LOL - LCK', home: 'Dplus KIA', away: 'KT Rolster',
+  url: 'https://www.bet365.com/#/AC/B151/C1/D19/E2/F19/',
+  header: 'LOL - LCK | Aug 9 1:00 AM | Dplus KIA vs KT Rolster',
+  groups,
+});
+const NOW = Date.parse('2026-08-09T00:00:00Z');
+
+test('bet365 player props zip prices onto the right player', () => {
+  // The grid is label-aligned: cells[i] belongs to labels[i].
+  const { event, quotes } = bet365.extractEvent(b365Event([{
+    title: 'Map 1 - Player Total Kills',
+    labels: ['Siwoo', 'Lucid', 'ShowMaker'],
+    columns: [
+      { header: 'Over', cells: [{ hcap: '2.5', odds: '1.72' }, { hcap: '2.5', odds: '1.83' }, { hcap: '3.5', odds: '1.61' }] },
+      { header: 'Under', cells: [{ hcap: '2.5', odds: '2.00' }, { hcap: '2.5', odds: '1.83' }, { hcap: '3.5', odds: '2.20' }] },
+    ],
+  }]), { now: NOW });
+  assert.equal(event.league, 'LCK');
+  assert.equal(event.startTime, Date.parse('2026-08-09T08:00:00Z'));
+  assert.equal(quotes.length, 6);
+  const show = quotes.filter((q) => q.subjectKey === 'showmaker');
+  assert.deepEqual(show.map((q) => `${q.side}${q.line}@${q.odds}`), ['over3.5@1.61', 'under3.5@2.2']);
 });
 
-test('bet365 is registered but reports itself unavailable', async () => {
-  const entry = BOOKS.find((b) => b.id === 'bet365');
-  assert.ok(entry, 'bet365 should be in the registry');
-  assert.equal(entry.enabled, false);
+test('bet365 drops a column whose length does not match the labels', () => {
+  // A shifted grid would otherwise hand one player another player's price.
+  const { quotes } = bet365.extractEvent(b365Event([{
+    title: 'Map 1 - Player Total Kills',
+    labels: ['Siwoo', 'Lucid', 'ShowMaker'],
+    columns: [{ header: 'Over', cells: [{ hcap: '2.5', odds: '1.72' }, { hcap: '2.5', odds: '1.83' }] }],
+  }]), { now: NOW });
+  assert.equal(quotes.length, 0);
+});
+
+test('bet365 Match Lines splits into three markets', () => {
+  const { quotes } = bet365.extractEvent(b365Event([{
+    title: 'Match Lines',
+    labels: ['To Win', 'Match Handicap', 'Total Maps'],
+    columns: [
+      { header: 'Dplus KIA', cells: [{ hcap: '', odds: '1.57' }, { hcap: '-1.5', odds: '2.75' }, { hcap: 'O 2.5', odds: '1.90' }] },
+      { header: 'KT Rolster', cells: [{ hcap: '', odds: '2.25' }, { hcap: '+1.5', odds: '1.40' }, { hcap: 'U 2.5', odds: '1.80' }] },
+    ],
+  }]), { now: NOW });
+  const byFam = (f) => quotes.filter((q) => q.family === f);
+  assert.deepEqual(byFam('match_winner').map((q) => [q.team, q.odds]),
+    [['Dplus KIA', 1.57], ['KT Rolster', 2.25]]);
+  assert.deepEqual(byFam('maps_handicap').map((q) => [q.team, q.handicap]),
+    [['Dplus KIA', -1.5], ['KT Rolster', 1.5]]);
+  // On the Total Maps row the columns are Over/Under, not teams — the O/U
+  // prefix inside the cell is what decides the side.
+  assert.deepEqual(byFam('total_maps').map((q) => `${q.side}${q.line}@${q.odds}`),
+    ['over2.5@1.9', 'under2.5@1.8']);
+});
+
+test('bet365 LPL fixtures are skipped', () => {
+  const ev = b365Event([]);
+  ev.league = 'LOL - LPL Split 3';
+  assert.equal(bet365.extractEvent(ev, { now: NOW }).event, null);
+});
+
+test('bet365 ignores a stale snapshot', async () => {
+  const tmp = require('path').join(require('os').tmpdir(), 'b365-test.json');
+  require('fs').writeFileSync(tmp, JSON.stringify({ scrapedAt: Date.now() - 6 * 3600e3, events: [] }));
   const warns = [];
-  const out = await bet365.collect({ onWarn: (m) => warns.push(m) });
-  // It must return nothing rather than invent prices, and say why.
-  assert.deepEqual(out.events, []);
+  const out = await bet365.collect({ file: tmp, onWarn: (m) => warns.push(m) });
   assert.deepEqual(out.quotes, []);
-  assert.equal(out.status.ok, false);
-  assert.match(warns[0], /empty payloads/i);
+  assert.match(warns[0], /snapshot is \d+min old/);
+  require('fs').unlinkSync(tmp);
+});
+
+test('bet365 reports a missing snapshot instead of failing', async () => {
+  const warns = [];
+  const out = await bet365.collect({ file: '/definitely/not/here.json', onWarn: (m) => warns.push(m) });
+  assert.deepEqual(out.events, []);
+  assert.match(warns[0], /no snapshot/);
+});
+
+test('bet365 is registered in the book list', () => {
+  assert.ok(BOOKS.find((b) => b.id === 'bet365'));
 });
 
 test('market labels read sensibly', () => {

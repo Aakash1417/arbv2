@@ -152,6 +152,8 @@ const TYPE_FAMILY = {
   'P:ML': 'map_winner',
   'P:TOTKILLOU': 'map_total_kills',
   'P:KHCP': 'map_kills_handicap',
+  'P:THCP': 'map_towers_handicap',
+  'P:DRHCP': 'map_dragons_handicap',
   'P:TOTNSHOU': 'map_total_barons',
   'P:TOTTOWOU': 'map_total_towers',
   'P:TOTDROU': 'map_total_dragons',

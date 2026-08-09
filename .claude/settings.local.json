@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{size_download}\\\\n\" -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0 Safari/537.36\" \"https://betway.com/g/en-ca/sports/grp/esports/league-of-legends/lpl\" --max-time 30)"
+    ]
+  }
+}

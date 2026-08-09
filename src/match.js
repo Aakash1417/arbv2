@@ -122,13 +122,17 @@ function groupMarkets(quoteLists, canon) {
       const resolved = resolveQuote(q, canon);
       if (!resolved) continue;
 
-      let g = groups.find((x) =>
-        x.family === q.family &&
-        x.scope === q.scope &&
-        x.kind === resolved.kind &&
-        (x.subjectKey || q.subjectKey
-          ? x.subjectKey && q.subjectKey && subjectsMatch(x.family, x.subjectKey, q.subjectKey)
-          : true));
+      const sameMarket = (x) =>
+        x.family === q.family && x.scope === q.scope && x.kind === resolved.kind;
+
+      // An exact subject always wins over a fuzzy one. Without this, a quote
+      // for a team the books word differently could attach to a neighbouring
+      // group that merely overlaps it.
+      let g = groups.find((x) => sameMarket(x) && x.subjectKey === q.subjectKey);
+      if (!g && q.subjectKey) {
+        g = groups.find((x) => sameMarket(x) && x.subjectKey
+          && subjectsMatch(x.family, x.subjectKey, q.subjectKey));
+      }
 
       if (!g) {
         g = {

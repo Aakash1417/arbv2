@@ -36,6 +36,8 @@ const FAMILIES = {
   map_winner:           { label: 'Map Winner',          metric: 'cat',    subject: 'none' },
   map_total_kills:      { label: 'Total Kills',         metric: 'total',  subject: 'none' },
   map_kills_handicap:   { label: 'Kills Handicap',      metric: 'margin', subject: 'none' },
+  map_towers_handicap:  { label: 'Towers Handicap',     metric: 'margin', subject: 'none' },
+  map_dragons_handicap: { label: 'Dragons Handicap',    metric: 'margin', subject: 'none' },
   map_total_barons:     { label: 'Total Barons',        metric: 'total',  subject: 'none' },
   map_total_towers:     { label: 'Total Towers',        metric: 'total',  subject: 'none' },
   map_total_dragons:    { label: 'Total Dragons',       metric: 'total',  subject: 'none' },
@@ -48,6 +50,8 @@ const FAMILIES = {
 
   // --- player level -------------------------------------------------------
   player_kills:         { label: 'Player Total Kills',  metric: 'total',  subject: 'player' },
+  player_deaths:        { label: 'Player Total Deaths', metric: 'total',  subject: 'player' },
+  player_assists:       { label: 'Player Total Assists', metric: 'total', subject: 'player' },
 };
 
 const isLineFamily = (id) => {

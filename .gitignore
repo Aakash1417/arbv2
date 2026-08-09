@@ -1,4 +1,6 @@
-node_modules
-.claude
-.cursor
-.probe
+node_modules/
+.env
+.env.local
+*.log
+scan.json
+data/

@@ -35,22 +35,37 @@ function normalizePlayer(name) {
   return strip(String(name).replace(/\([^)]*\)/g, '')).replace(/\s+/g, '');
 }
 
+/**
+ * Team names are compared on whole tokens, never as raw substrings.
+ *
+ * Books qualify the same org differently ("FearX" / "Bnk Fearx", "DRX" /
+ * "Kiwoom DRX"), so a shared token is enough. But a substring test would call
+ * "Team WE" ("we") a match for "Weibo Gaming" ("weibo") — two different LPL
+ * orgs — so it is not used.
+ */
 function teamsMatch(a, b) {
   if (!a || !b) return false;
   if (a === b) return true;
-  if (a.includes(b) || b.includes(a)) return true;
-  const A = new Set(a.split(' '));
-  const B = new Set(b.split(' '));
+  const A = new Set(a.split(' ').filter(Boolean));
+  const B = new Set(b.split(' ').filter(Boolean));
+  if (!A.size || !B.size) return false;
   let hit = 0;
   for (const t of A) if (B.has(t)) hit++;
   return hit / Math.min(A.size, B.size) >= 0.5;
 }
 
+/**
+ * Player handles must match exactly once normalised.
+ *
+ * Deliberately strict: LPL fields both "Wei" and "Weiwei" in the same fixture,
+ * and any prefix or substring rule pairs one player's Over with the other's
+ * Under and reports a large phantom arb. The decoration books actually add
+ * ("Ahn (An Shan-Ye)" vs "Ahn") is already removed by normalizePlayer, so
+ * exact comparison loses nothing real.
+ */
 function playersMatch(a, b) {
   if (!a || !b) return false;
-  if (a === b) return true;
-  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  return short.length >= 3 && long.startsWith(short);
+  return a === b;
 }
 
 /**
