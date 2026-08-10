@@ -52,6 +52,25 @@ function readCoupon() {
     return '';
   };
 
+  /**
+   * Which day a fixture sits under.
+   *
+   * Inside a league's label column the rows are interleaved: a date heading
+   * ("Mon Aug 10"), then that day's fixtures, then the next heading. So the
+   * day is whichever heading most recently preceded the row — read in document
+   * order, not searched for.
+   */
+  const dayByFixture = new Map();
+  for (const col of document.querySelectorAll('[class*="MarketFixtureDetailsLabel"]')) {
+    let day = '';
+    for (const child of col.children) {
+      const cls = String(child.className || '');
+      if (/MarketHeaderLabel/.test(cls)) { day = t(child); continue; }
+      const row = child.matches(FIX) ? child : child.querySelector(FIX);
+      if (row) dayByFixture.set(row, day);
+    }
+  }
+
   const fixtures = [];
   const groups = [...document.querySelectorAll('[class*="CompetitionMarketGroup"]')]
     .filter((g) => g.querySelector(FIX));
@@ -70,6 +89,7 @@ function readCoupon() {
         home: names[0] || '',
         away: names[1] || '',
         time: timeFor(el),
+        day: dayByFixture.get(el) || '',
       });
     }
   }
