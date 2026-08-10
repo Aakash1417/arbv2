@@ -80,7 +80,20 @@ LoL arbitrage scanner — Betway vs BET99
 `;
 
 const pct = (n) => `${(n * 100).toFixed(2)}%`;
-const when = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+
+/** Kickoff times are shown in Mountain time, matching where these are bet from. */
+const DISPLAY_TZ = 'America/Edmonton';
+
+const when = (ms) => {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: DISPLAY_TZ, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+    }).formatToParts(new Date(ms)).map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ${p.timeZoneName}`;
+};
 
 const american = (n) => (n > 0 ? `+${n}` : String(n));
 
@@ -129,18 +142,15 @@ function render(result, opts) {
     console.log(`           ${a.event.league} — ${a.event.name}  (${when(a.event.startTime)})`);
 
     const width = Math.max(...a.legs.map((l) => l.label.length));
-    a.legs.forEach((l, i) => {
+    a.legs.forEach((l) => {
       console.log(
         `           ${l.label.padEnd(width)}  ${american(l.american).padStart(6)} ` +
-        `(${l.odds.toFixed(3)})  on ${l.book.padEnd(7)} stake $${a.stakes.each[i]}`,
+        `(${l.odds.toFixed(3)})  on ${l.book}`,
       );
     });
 
-    console.log(
-      `           $${opts.bankroll} staked -> $${a.stakes.payout} back, profit $${a.stakes.profit}` +
-      (a.type === 'middle'
-        ? `  (both legs win between ${a.middleRange[0]} and ${a.middleRange[1]})`
-        : ''),
+    if (a.type === 'middle') console.log(
+      `           both legs win between ${a.middleRange[0]} and ${a.middleRange[1]}`,
     );
     if (a.pushRisk) console.log('           note: whole-number line, a tie pushes.');
     // Per-leg links: each goes straight to the book and market tab you bet on.
