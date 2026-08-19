@@ -9,6 +9,8 @@
   "scripts": {
     "scan": "node find-arbs.js",
     "watch": "node find-arbs.js --watch 60",
+    "notify": "node notify-telegram.js",
+    "notify:loop": "node notify-telegram.js --loop 3600",
     "test": "node --test test/*.test.js"
   },
   "keywords": [

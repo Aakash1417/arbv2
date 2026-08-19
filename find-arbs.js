@@ -22,7 +22,7 @@ function parseArgs(argv) {
   const o = {
     leagues: DEFAULT_KEYS,
     hours: 24,
-    minRoi: 0.02,
+    minRoi: 0.01,
     bankroll: 100,
     crossBookOnly: true,
     families: null,
