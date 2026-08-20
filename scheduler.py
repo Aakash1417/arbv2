@@ -5,7 +5,7 @@ LoL Arbitrage Scanner - Python Scheduler
 Runs the arbitrage scanner, dispatches results to Telegram, and dynamically schedules
 the next scan:
   - Every 15 minutes if matches are currently live (started within the last 2 hours).
-  - Every 1 hour otherwise.
+  - Every 2 hours otherwise.
 
 Usage:
   python3 scheduler.py             # Start dynamic scheduler
@@ -26,7 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent
 SCAN_JSON_PATH = BASE_DIR / "scan.json"
 
 # Default intervals in minutes
-DEFAULT_IDLE_INTERVAL_MINUTES = 60
+DEFAULT_IDLE_INTERVAL_MINUTES = 120
 DEFAULT_LIVE_INTERVAL_MINUTES = 15
 DEFAULT_LIVE_LOOKBACK_HOURS = 2
 
