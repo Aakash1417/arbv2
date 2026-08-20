@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { findArbs, stakes, invSum, marketLabel } = require('../src/arb');
+const { findArbs, stakes, invSum, marketLabel, calculateBet99TargetWin, calculatePlatformSizing } = require('../src/arb');
 const betway = require('../src/books/betway');
 const bet99 = require('../src/books/bet99');
 const { clusterEvents, groupMarkets, resolveQuote, sideOf } = require('../src/match');
@@ -701,3 +701,46 @@ test('betway is queried by slug, other books by league key', () => {
   assert.ok(DEFAULT_KEYS.includes('LPL') && DEFAULT_KEYS.includes('LCK CL'));
   assert.equal(betwaySlugs().length, DEFAULT_KEYS.length);
 });
+
+// ------------------------------------------------------------- platform sizing
+
+test('calculateBet99TargetWin selects correct target win based on match start time', () => {
+  const now = 1000000000000;
+  const hourMs = 3600 * 1000;
+
+  // 18 hours in future (12-24h window) -> $100
+  assert.equal(calculateBet99TargetWin(now + 18 * hourMs, now), 100);
+
+  // 12 hours in future (>=12h boundary) -> $100
+  assert.equal(calculateBet99TargetWin(now + 12 * hourMs, now), 100);
+
+  // 5 hours in future (1-12h window) -> $200
+  assert.equal(calculateBet99TargetWin(now + 5 * hourMs, now), 200);
+
+  // 30 minutes in future (<=1h window) -> $400
+  assert.equal(calculateBet99TargetWin(now + 0.5 * hourMs, now), 400);
+
+  // Already started (live match) -> $400
+  assert.equal(calculateBet99TargetWin(now - 1 * hourMs, now), 400);
+});
+
+test('calculatePlatformSizing computes betway stake and max profit given bet99 target win', () => {
+  const now = 1000000000000;
+  const hourMs = 3600 * 1000;
+
+  const mockArb = {
+    event: { startTime: now + 5 * hourMs }, // 5h -> target win = $200
+    legs: [
+      { book: 'bet99', odds: 2.10, label: 'OVER 2.5' },  // profit ratio 1.10 -> bet99 stake = 200 / 1.10 = 181.82, payout = 381.82
+      { book: 'betway', odds: 2.05, label: 'UNDER 2.5' }, // betway stake = 381.82 / 2.05 = 186.25
+    ],
+  };
+
+  const res = calculatePlatformSizing(mockArb, now);
+  assert.equal(res.targetWin, 200);
+  assert.equal(res.bet99Stake, 181.82);
+  assert.equal(res.betwayStake, 186.25);
+  assert.equal(res.totalStake, 368.07);
+  assert.equal(res.maxProfit, 13.75);
+});
+

@@ -152,15 +152,16 @@ function findArbs(group, event, opts = {}) {
   return found.sort((x, y) => y.roi - x.roi);
 }
 
-/** Keep only the best opportunity per market so output stays readable. */
-function dedupeBest(arbs) {
+/** Keep only the best opportunity per market (highest max profit) so output stays readable. */
+function dedupeBest(arbs, nowMs = Date.now()) {
+  const getProfit = (a) => a.maxProfit ?? calculatePlatformSizing(a, nowMs).maxProfit;
   const best = new Map();
   for (const a of arbs) {
     const key = `${a.event.key}|${a.family}|${a.scope}|${a.subject || ''}`;
     const prev = best.get(key);
-    if (!prev || a.roi > prev.roi) best.set(key, a);
+    if (!prev || getProfit(a) > getProfit(prev)) best.set(key, a);
   }
-  return [...best.values()].sort((x, y) => y.roi - x.roi);
+  return [...best.values()].sort((x, y) => getProfit(y) - getProfit(x) || y.roi - x.roi);
 }
 
 /** Human label for a market, e.g. "Kills Handicap · Map 1" or "JackeyLove · Map 1". */
@@ -171,7 +172,101 @@ function marketLabel(arb) {
   return `${base} · ${scope}`;
 }
 
+/**
+ * Determines BET99 target win amount based on match start time relative to current time.
+ * - 12 to 24 hours before match (or >= 12h): win $100
+ * - Between 12 and 1 hour before: win $200
+ * - Within 1 hour before match (or live/in-progress): win $400
+ */
+function calculateBet99TargetWin(startTimeMs, nowMs = Date.now()) {
+  if (!startTimeMs) return 100;
+  const hoursToMatch = (startTimeMs - nowMs) / (3600 * 1000);
+  if (hoursToMatch >= 12) {
+    return 100;
+  } else if (hoursToMatch > 1) {
+    return 200;
+  } else {
+    return 400;
+  }
+}
+
+/**
+ * Calculates platform-specific sizing and max profit for an arbitrage opportunity.
+ * Targets Bet99 win amount ($100/$200/$400) and calculates the required bet on Betway
+ * (or other legs) to achieve equal payout hedging and maximum guaranteed profit.
+ */
+function calculatePlatformSizing(arb, nowMs = Date.now()) {
+  const startTimeMs = arb.event?.startTime;
+  const targetWin = calculateBet99TargetWin(startTimeMs, nowMs);
+
+  const legs = arb.legs || [];
+  const bet99Leg = legs.find((l) => l.book && l.book.toLowerCase() === 'bet99');
+  const betwayLeg = legs.find((l) => l.book && l.book.toLowerCase() === 'betway');
+
+  if (bet99Leg && bet99Leg.odds > 1) {
+    const bet99Stake = round2(targetWin / (bet99Leg.odds - 1));
+    const payout = round2(bet99Stake * bet99Leg.odds);
+
+    const legStakes = {};
+    let totalStake = 0;
+
+    legs.forEach((leg) => {
+      const bName = leg.book;
+      if (bName && bName.toLowerCase() === 'bet99') {
+        legStakes[bName] = bet99Stake;
+        totalStake += bet99Stake;
+      } else {
+        const legStake = round2(payout / leg.odds);
+        legStakes[bName] = legStake;
+        totalStake += legStake;
+      }
+    });
+
+    totalStake = round2(totalStake);
+    const maxProfit = round2(payout - totalStake);
+
+    return {
+      targetWin,
+      bet99Stake,
+      betwayStake: betwayLeg ? (legStakes[betwayLeg.book] || 0) : (legStakes['betway'] || 0),
+      legStakes,
+      payout,
+      totalStake,
+      maxProfit,
+      hoursToMatch: startTimeMs ? (startTimeMs - nowMs) / (3600 * 1000) : null,
+    };
+  }
+
+  const primaryLeg = legs[0];
+  const primaryStake = primaryLeg && primaryLeg.odds > 1 ? round2(targetWin / (primaryLeg.odds - 1)) : 100;
+  const payout = primaryLeg ? round2(primaryStake * primaryLeg.odds) : 100;
+
+  const legStakes = {};
+  let totalStake = 0;
+  legs.forEach((leg) => {
+    const legStake = round2(payout / leg.odds);
+    legStakes[leg.book] = legStake;
+    totalStake += legStake;
+  });
+
+  totalStake = round2(totalStake);
+  const maxProfit = round2(payout - totalStake);
+
+  return {
+    targetWin,
+    bet99Stake: 0,
+    betwayStake: legStakes['betway'] || 0,
+    legStakes,
+    payout,
+    totalStake,
+    maxProfit,
+    hoursToMatch: startTimeMs ? (startTimeMs - nowMs) / (3600 * 1000) : null,
+  };
+}
+
 module.exports = {
   findArbs, findLineArbs, findCategoricalArbs, stakes, invSum, dedupeBest, marketLabel,
+  calculateBet99TargetWin, calculatePlatformSizing,
   isMarginFamily,
 };
+

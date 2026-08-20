@@ -14,7 +14,7 @@
 const fs = require('fs');
 const { scan } = require('./src/scan');
 const { FAMILIES } = require('./src/markets');
-const { marketLabel } = require('./src/arb');
+const { marketLabel, calculatePlatformSizing } = require('./src/arb');
 const { BOOKS } = require('./src/books');
 const { DEFAULT_KEYS } = require('./src/leagues');
 
@@ -138,14 +138,18 @@ function render(result, opts) {
       ? `MIDDLE ${a.middleRange[0]}–${a.middleRange[1]}`
       : a.shape === 'categorical' && a.legs.length > 2 ? `${a.legs.length}-WAY` : 'EXACT';
 
+    const sizing = calculatePlatformSizing(a);
+
     console.log(`  ${pct(a.roi).padStart(7)}  ${tag}  ${marketLabel(a)}`);
     console.log(`           ${a.event.league} — ${a.event.name}  (${when(a.event.startTime)})`);
 
     const width = Math.max(...a.legs.map((l) => l.label.length));
     a.legs.forEach((l) => {
+      const stakeVal = sizing.legStakes[l.book];
+      const stakeStr = stakeVal ? `  [Bet: $${stakeVal.toFixed(2)}]` : '';
       console.log(
         `           ${l.label.padEnd(width)}  ${american(l.american).padStart(6)} ` +
-        `(${l.odds.toFixed(3)})  on ${l.book}`,
+        `(${l.odds.toFixed(3)})  on ${l.book}${stakeStr}`,
       );
     });
 
@@ -153,6 +157,7 @@ function render(result, opts) {
       `           both legs win between ${a.middleRange[0]} and ${a.middleRange[1]}`,
     );
     if (a.pushRisk) console.log('           note: whole-number line, a tie pushes.');
+    console.log(`           Target Win (BET99): $${sizing.targetWin.toFixed(2)} | Total Bet: $${sizing.totalStake.toFixed(2)} | Max Profit: $${sizing.maxProfit.toFixed(2)}`);
     // Per-leg links: each goes straight to the book and market tab you bet on.
     a.legs.forEach((l) => console.log(`           ${l.book.padEnd(7)}-> ${l.url}`));
     console.log();

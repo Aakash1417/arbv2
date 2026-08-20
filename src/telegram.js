@@ -1,6 +1,6 @@
 'use strict';
 
-const { marketLabel } = require('./arb');
+const { marketLabel, calculatePlatformSizing } = require('./arb');
 
 /**
  * Escapes special HTML characters for Telegram HTML parse mode.
@@ -43,9 +43,9 @@ function formatTime(ms, tz = 'America/Edmonton') {
 }
 
 /**
- * Formats a single arbitrage opportunity into concise, clear text without emojis or stake dollars.
+ * Formats a single arbitrage opportunity into concise, clear text with platform bet sizing and profit info.
  */
-function formatArbBlock(arb, tz = 'America/Edmonton') {
+function formatArbBlock(arb, tz = 'America/Edmonton', nowMs = Date.now()) {
   const tag =
     arb.type === 'middle'
       ? `MIDDLE ${arb.middleRange[0]}–${arb.middleRange[1]}`
@@ -57,25 +57,30 @@ function formatArbBlock(arb, tz = 'America/Edmonton') {
   const league = escapeHtml(arb.event.league || 'LoL');
   const matchName = escapeHtml(arb.event.name);
   const matchTime = escapeHtml(formatTime(arb.event.startTime, tz));
+  const sizing = calculatePlatformSizing(arb, nowMs);
 
   let out = `<b>${pct(arb.roi)} [${tag}]</b>\n`;
   out += `<b>${league}</b> — ${matchName} (${matchTime})\n`;
   out += `${mLabel}\n`;
 
-  // Legs breakdown (American odds only, clickable book link)
+  // Legs breakdown (American odds only, clickable book link, platform stakes)
   arb.legs.forEach((l) => {
     const bookStr = l.url
       ? `<a href="${l.url}">${escapeHtml(l.book)}</a>`
       : escapeHtml(l.book);
     const legLabel = escapeHtml(l.label);
     const oddsStr = american(l.american);
+    const stakeVal = sizing.legStakes[l.book];
+    const stakeStr = stakeVal ? ` — Bet: <b>$${stakeVal.toFixed(2)}</b>` : '';
 
-    out += `• ${legLabel}: <code>${oddsStr}</code> on ${bookStr}\n`;
+    out += `• ${legLabel}: <code>${oddsStr}</code> on ${bookStr}${stakeStr}\n`;
   });
 
   if (arb.type === 'middle' && arb.middleRange) {
     out += `Both legs win between ${arb.middleRange[0]} and ${arb.middleRange[1]}\n`;
   }
+
+  out += `🎯 <b>BET99 Target Win:</b> $${sizing.targetWin.toFixed(2)} | <b>Total Bet:</b> $${sizing.totalStake.toFixed(2)} | <b>Max Profit:</b> $${sizing.maxProfit.toFixed(2)}\n`;
 
   return out;
 }
@@ -85,6 +90,7 @@ function formatArbBlock(arb, tz = 'America/Edmonton') {
  */
 function formatTelegramMessages(result, opts = {}) {
   const tz = opts.timezone || 'America/Edmonton';
+  const nowMs = opts.now || Date.now();
   const arbs = opts.all ? result.allArbs : result.arbs;
 
   if (!arbs || !arbs.length) {
@@ -97,7 +103,7 @@ function formatTelegramMessages(result, opts = {}) {
   let currentMsg = `<b>Found ${arbs.length} arbitrage opportunit${arbs.length === 1 ? 'y' : 'ies'}:</b>\n\n`;
 
   for (let i = 0; i < arbs.length; i++) {
-    const block = formatArbBlock(arbs[i], tz) + '\n';
+    const block = formatArbBlock(arbs[i], tz, nowMs) + '\n';
 
     if (currentMsg.length + block.length > 3900) {
       messages.push(currentMsg.trim());

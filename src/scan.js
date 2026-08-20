@@ -2,7 +2,7 @@
 
 const { BOOKS, enabledBooks } = require('./books');
 const { clusterEvents, groupMarkets } = require('./match');
-const { findArbs, dedupeBest } = require('./arb');
+const { findArbs, dedupeBest, calculatePlatformSizing } = require('./arb');
 const { FAMILIES } = require('./markets');
 const { DEFAULT_KEYS, betwaySlugs } = require('./leagues');
 
@@ -96,8 +96,18 @@ async function scan(opts = {}) {
     }
   }
 
+  const scannedAt = Date.now();
+  for (const arb of arbs) {
+    const sizing = calculatePlatformSizing(arb, scannedAt);
+    arb.platformSizing = sizing;
+    arb.maxProfit = sizing.maxProfit;
+  }
+
+  const sortedAllArbs = [...arbs].sort((x, y) => y.maxProfit - x.maxProfit || y.roi - x.roi);
+  const dedupedArbs = dedupeBest(arbs, scannedAt);
+
   return {
-    scannedAt: Date.now(),
+    scannedAt,
     books: BOOKS.map((b) => ({
       id: b.id,
       enabled: b.enabled,
@@ -117,8 +127,8 @@ async function scan(opts = {}) {
       startTime: c.canon.startTime,
       books: [...c.byBook.keys()],
     })),
-    arbs: dedupeBest(arbs),
-    allArbs: arbs.sort((x, y) => y.roi - x.roi),
+    arbs: dedupedArbs,
+    allArbs: sortedAllArbs,
   };
 }
 
