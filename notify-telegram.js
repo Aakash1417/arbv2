@@ -19,6 +19,7 @@ const { scan } = require('./src/scan');
 const { getEnvConfig } = require('./src/env');
 const { formatTelegramMessages, dispatchTelegramReport } = require('./src/telegram');
 const { DEFAULT_KEYS } = require('./src/leagues');
+const { processNewArbs, markArbsSentToTelegram } = require('./src/db');
 
 function parseArgs(argv) {
   const env = getEnvConfig();
@@ -58,7 +59,7 @@ function parseArgs(argv) {
       case '--send-empty': o.sendEmptyReport = true; break;
       case '--no-empty': o.sendEmptyReport = false; break;
       case '--dry-run': o.dryRun = true; break;
-      case '--loop': o.loop = Number(next() || 3600); break;
+      case '--loop': o.loop = Number(next() || 900); break;
       case '--all': o.all = true; break;
       case '-v': case '--verbose': o.verbose = true; break;
       case '-h': case '--help': o.help = true; break;
@@ -77,7 +78,7 @@ Usage:
 
 Options:
   --dry-run               Format messages and print to stdout without sending to Telegram
-  --loop [seconds]        Run continuously every N seconds (default: 3600 for hourly)
+  --loop [seconds]        Run continuously every N seconds (default: 900 for 15-minute)
   --min-roi [percent]     Minimum ROI edge percentage (default: from .env or 1)
   --bankroll [amount]     Total stake sizing for calculation (default: 100)
   --hours [N]             Scan events within next N hours (default: 24)
@@ -104,11 +105,23 @@ async function runOnce(opts) {
     },
   });
 
-  const arbsCount = (opts.all ? result.allArbs : result.arbs).length;
+  const rawArbs = opts.all ? result.allArbs : result.arbs;
   console.log(
     `[${ts}] Scan completed: ${result.stats.matchedFixtures} matched fixtures, ` +
-    `${result.stats.comparedMarkets} compared markets, ${arbsCount} opportunities found.`
+    `${result.stats.comparedMarkets} compared markets, ${rawArbs.length} total opportunity/opportunities found.`
   );
+
+  // Store in SQLite database and filter down to new unsent opportunities
+  const dbRes = processNewArbs(rawArbs);
+  console.log(
+    `[${ts}] DB Storage: ${dbRes.newCount} new unsent opportunity/opportunities found (${dbRes.existingCount} already sent/seen).`
+  );
+
+  const filteredResult = {
+    ...result,
+    arbs: dbRes.newArbs,
+    allArbs: dbRes.newArbs,
+  };
 
   if (opts.json) {
     fs.writeFileSync(opts.json, JSON.stringify(result, null, 2));
@@ -116,7 +129,7 @@ async function runOnce(opts) {
 
   if (opts.dryRun) {
     console.log('\n--- [DRY RUN] Telegram Messages Preview ---');
-    const msgs = formatTelegramMessages(result, opts);
+    const msgs = formatTelegramMessages(filteredResult, opts);
     msgs.forEach((m, idx) => {
       console.log(`\n=== Message ${idx + 1}/${msgs.length} (${m.length} chars) ===\n${m}`);
     });
@@ -136,8 +149,10 @@ async function runOnce(opts) {
   }
 
   try {
-    const res = await dispatchTelegramReport(opts.token, opts.chatId, result, opts);
+    const res = await dispatchTelegramReport(opts.token, opts.chatId, filteredResult, opts);
     if (res.sent) {
+      const sentSigs = dbRes.newArbs.map((a) => a.signature);
+      markArbsSentToTelegram(sentSigs);
       console.log(`[${ts}] Successfully sent ${res.count} message(s) to Telegram chat ${opts.chatId}.`);
     } else {
       console.log(`[${ts}] Telegram alert skipped: ${res.reason}.`);
