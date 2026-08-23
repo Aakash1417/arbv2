@@ -18,11 +18,11 @@ const ozoon = require('./ozoon');
 const bet365 = require('./bet365');
 
 const BOOKS = [
-  { id: 'betway', label: 'Betway', enabled: true, mod: betway },
-  { id: 'bet99', label: 'BET99', enabled: true, mod: bet99 },
-  { id: 'ozoon', label: 'Ozoon', enabled: false, mod: ozoon },
-  // Scraped by tools/bet365-scrape.js into data/bet365.json; this reads that.
-  { id: 'bet365', label: 'bet365 (Selenium snapshot)', enabled: false, mod: bet365 },
+    { id: 'betway', label: 'Betway', enabled: true, mod: betway },
+    { id: 'bet99', label: 'BET99', enabled: true, mod: bet99 },
+    { id: 'ozoon', label: 'Ozoon', enabled: true, mod: ozoon },
+    // Scraped by tools/bet365-scrape.js into data/bet365.json; this reads that.
+    { id: 'bet365', label: 'bet365 (Selenium snapshot)', enabled: false, mod: bet365 },
 ];
 
 const enabledBooks = () => BOOKS.filter((b) => b.enabled);

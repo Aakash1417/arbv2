@@ -59,7 +59,7 @@ function parseArgs(argv) {
       case '--send-empty': o.sendEmptyReport = true; break;
       case '--no-empty': o.sendEmptyReport = false; break;
       case '--dry-run': o.dryRun = true; break;
-      case '--loop': o.loop = Number(next() || 900); break;
+      case '--loop': o.loop = Number(next() || 300); break;
       case '--all': o.all = true; break;
       case '-v': case '--verbose': o.verbose = true; break;
       case '-h': case '--help': o.help = true; break;
@@ -78,7 +78,7 @@ Usage:
 
 Options:
   --dry-run               Format messages and print to stdout without sending to Telegram
-  --loop [seconds]        Run continuously every N seconds (default: 900 for 15-minute)
+  --loop [seconds]        Run continuously every N seconds (default: 300 for 5-minute)
   --min-roi [percent]     Minimum ROI edge percentage (default: from .env or 1)
   --bankroll [amount]     Total stake sizing for calculation (default: 100)
   --hours [N]             Scan events within next N hours (default: 24)

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-LoL Arbitrage Scanner - Fixed 15-Minute Python Scheduler
+LoL Arbitrage Scanner - Fixed 5-Minute Python Scheduler
 
-Runs the arbitrage scanner every 15 minutes. Dispatches newly discovered
+Runs the arbitrage scanner every 5 minutes. Dispatches newly discovered
 opportunities to Telegram (using SQLite database deduplication) and logs scan output.
 
 Usage:
-  python3 scheduler.py             # Start 15-minute scheduler loop
+  python3 scheduler.py             # Start 5-minute scheduler loop
   python3 scheduler.py --dry-run   # Preview formatting without sending Telegram alerts
   python3 scheduler.py --once      # Run once and exit immediately
-  python3 scheduler.py --interval 15 # Custom interval in minutes (default: 15)
+  python3 scheduler.py --interval 5  # Custom interval in minutes (default: 5)
 """
 
 import sys
@@ -24,7 +24,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 SCAN_JSON_PATH = BASE_DIR / "scan.json"
 
-DEFAULT_SCAN_INTERVAL_MINUTES = 15
+DEFAULT_SCAN_INTERVAL_MINUTES = 5
 
 
 def get_local_now_str():
@@ -64,7 +64,7 @@ def main():
                 pass
 
     print("=" * 60)
-    print("       ⚡ LoL Arbitrage 15-Minute Python Scheduler ⚡")
+    print("       ⚡ LoL Arbitrage 5-Minute Python Scheduler ⚡")
     print("=" * 60)
     print(f"  • Fixed scan interval: {scan_interval} minutes")
     print(f"  • Dry run mode:        {'ENABLED' if dry_run else 'DISABLED'}")
