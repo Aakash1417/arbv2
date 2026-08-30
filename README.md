@@ -6,6 +6,7 @@ markets — by comparing sportsbooks against each other.
 | book | status |
 | --- | --- |
 | Betway (en-CA) | working — direct |
+| theScore Bet (Alberta) | working — direct GraphQL API |
 | BET99 | working — direct |
 | Ozoon | working — direct |
 | bet365 | working — Selenium scrape, incl. **player props** (see [bet365](#bet365)) |
@@ -14,7 +15,7 @@ The pipeline is N-book: fixtures cluster across any number of books and a market
 is comparable as soon as two of them price it — including fixtures or markets
 the first book doesn't carry.
 
-Three books expose their prices over plain public endpoints and need nothing
+Four books expose their prices over public endpoints and need nothing
 installed. bet365 has no usable API and is scraped with Selenium into a
 snapshot the scan reads. Node 18+ (Ozoon needs Node 22's built-in `WebSocket`,
 or Node 18/20 run with `--experimental-websocket`).
@@ -32,6 +33,7 @@ node find-arbs.js --markets match_winner,map_kills_handicap
 node find-arbs.js --list-markets         # what can be compared
 node find-arbs.js --list-books           # books and their status
 node find-arbs.js --books betway,bet99   # restrict to specific books
+node find-arbs.js --books betway,scorebet,bet365
 node find-arbs.js --hours 6              # only fixtures starting soon
 node find-arbs.js --min-roi 0            # show every edge (default floor is 2%)
 node find-arbs.js --leagues LPL,LCK      # restrict to specific leagues
@@ -44,10 +46,10 @@ npm test                                 # 55 unit tests over the math + parsers
 
 ## Leagues
 
-Eleven competitions are tracked, listed in `src/leagues.js`:
+Thirteen competitions are tracked, listed in `src/leagues.js`:
 
 `LPL` · `LCK` · `LCS` · `LEC` · `LCP` · `CBLOL` · `LCK CL` · `LES` · `LRN` ·
-`LRS` · `PRIME LEAGUE`
+`LRS` · `PRIME LEAGUE` · `LFL` · `CIRCUITO DESAFIANTE`
 
 Books disagree on naming in two ways, and both are reconciled there: season
 decoration (`LPL Split 3`, `LEC Summer`) is stripped, and different names for
@@ -55,9 +57,10 @@ the same competition are aliased onto one key — BET99's
 `LCK Challengers League` is Betway's and Ozoon's `LCK CL`. `LCK CL` is
 deliberately *not* folded into `LCK`; they are different competitions.
 
-Betway is queried by group slug (`lck-cl`, `prime-league`), the other books by
-league name, so the registry holds both. Competitions only one book prices are
-left out — they can never produce a cross-book arb.
+Betway is queried by group slug (`lck-cl`, `prime-league`). theScore Bet reads
+its live LoL menu and follows the exact competition paths it publishes, which
+currently cover LCS, LEC, LPL, CBLOL, Prime League, LES, LFL and Circuito
+Desafiante.
 
 ## Markets compared
 
@@ -146,9 +149,8 @@ The JSON dump (`--json`) carries both formats: `legs.over.odds` is decimal,
 
 ## How the data is obtained
 
-The three direct books were reverse-engineered from their own front-ends; those
-endpoints are public and unauthenticated. bet365 has no usable API and is
-scraped from the rendered site instead.
+The four direct books were reverse-engineered from their own front-ends. bet365
+has no usable API and is scraped from the rendered site instead.
 
 ### Betway — `src/books/betway.js`
 
@@ -162,6 +164,20 @@ Both require the full brand/territory envelope (`BrandId 3`, `LanguageId 25`,
 `TerritoryId 38`, `JurisdictionId 2`, …). Without it the gateway replies
 `ERR_NO_ROUTING_TARGET`. Player props sit in the `Map N - Player Specials`
 market group, titled `Map 1 - Total Kills - <player>`.
+
+### theScore Bet — `src/books/scorebet.js`
+
+theScore Bet's web app uses persisted GraphQL GET queries at
+`https://sportsbook.ca-ab.thescore.bet/graphql/persisted_queries/…`. The
+collector first calls the public `Startup` operation for a short-lived
+anonymous token, then reads `SportsMenu`, each competition's lines section,
+and the event drawers. It does not use a login, browser profile or saved
+cookies.
+
+The API returns exact decimal values as a numerator/denominator pair alongside
+the displayed American price. Moneyline, map spread, total maps, correct score,
+map winners, kill spreads/totals, first blood/baron/inhibitor, race to 10 kills
+and to-win-a-map are normalized into the same families as the other books.
 
 ### BET99 — `src/books/bet99.js`
 
@@ -289,6 +305,7 @@ left unmapped: no other book prices them.
 | `src/markets.js` | canonical market taxonomy + threshold conversion |
 | `src/books/index.js` | book registry, in priority order |
 | `src/books/betway.js` | Betway client + market classification |
+| `src/books/scorebet.js` | theScore Bet anonymous GraphQL client + market classification |
 | `src/books/bet99.js` | BET99 GraphQL client + market classification |
 | `src/books/ozoon.js` | Ozoon market classification |
 | `src/books/ozoon-feed.js` | Ozoon WebSocket feed client |
@@ -308,7 +325,7 @@ carrying a fixture defines its canonical home/away frame, and every other book's
 outcomes are resolved onto it by team name.
 | `src/normalize.js` | team/player/stat normalisation shared by both books |
 | `src/odds.js` | decimal ↔ American odds conversion |
-| `src/http.js` | retrying JSON POST + bounded-concurrency helper |
+| `src/http.js` | retrying JSON GET/POST + bounded-concurrency helper |
 
 ## Caveats
 

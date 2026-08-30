@@ -30,6 +30,8 @@ const LEAGUES = [
   { key: 'LRN',          betway: 'lrn' },
   { key: 'LRS',          betway: 'lrs' },
   { key: 'PRIME LEAGUE', betway: 'prime-league', aliases: ['PRIME LEAGUE 1ST DIVISION'] },
+  { key: 'LFL',          betway: 'lfl' },
+  { key: 'CIRCUITO DESAFIANTE', betway: 'circuito-desafiante', aliases: ['CD'] },
 ];
 
 const DEFAULT_KEYS = LEAGUES.map((l) => l.key);

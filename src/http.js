@@ -6,10 +6,7 @@ const UA =
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * POST JSON with retries. Both books are plain public endpoints, but they do
- * occasionally 5xx / rate-limit, so back off rather than dropping an event.
- */
+/** JSON request helpers with retries for the books' public endpoints. */
 async function postJson(url, body, { headers = {}, retries = 3, timeout = 30000 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -39,6 +36,33 @@ async function postJson(url, body, { headers = {}, retries = 3, timeout = 30000 
   throw lastErr;
 }
 
+async function getJson(url, { headers = {}, retries = 3, timeout = 30000 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt) await sleep(400 * 2 ** (attempt - 1));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        signal: ctrl.signal,
+        headers: {
+          accept: 'application/json, text/plain, */*',
+          'user-agent': UA,
+          ...headers,
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+      return await res.json();
+    } catch (err) {
+      lastErr = err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastErr;
+}
+
 /** Run `worker` over `items` with bounded concurrency, preserving order. */
 async function mapLimit(items, limit, worker) {
   const out = new Array(items.length);
@@ -54,4 +78,4 @@ async function mapLimit(items, limit, worker) {
   return out;
 }
 
-module.exports = { UA, postJson, mapLimit, sleep };
+module.exports = { UA, getJson, postJson, mapLimit, sleep };

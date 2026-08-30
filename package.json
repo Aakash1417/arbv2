@@ -1,7 +1,7 @@
 {
   "name": "arbv2",
   "version": "1.0.0",
-  "description": "League of Legends player-prop arbitrage scanner across Betway and BET99",
+  "description": "League of Legends arbitrage scanner across multiple sportsbooks",
   "main": "find-arbs.js",
   "bin": {
     "find-arbs": "find-arbs.js"

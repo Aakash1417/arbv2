@@ -8,6 +8,7 @@ const betway = require('../src/books/betway');
 const bet99 = require('../src/books/bet99');
 const { clusterEvents, groupMarkets, resolveQuote, sideOf } = require('../src/match');
 const bet365 = require('../src/books/bet365');
+const scorebet = require('../src/books/scorebet');
 const ozoon = require('../src/books/ozoon');
 const feed = require('../src/books/ozoon-feed');
 const { BOOKS } = require('../src/books');
@@ -230,6 +231,70 @@ test('betway titles classify into families', () => {
   assert.equal(c('Map 1 Winner & Total Kills'), null);
   assert.equal(c('Map 1 Race to 5 Kills'), null);
   assert.equal(c('Map 1 Penta Kill'), null);
+});
+
+test('theScore Bet titles classify into the shared market families', () => {
+  const c = scorebet.classifyMarket;
+  assert.deepEqual(c('Moneyline'), { family: 'match_winner', scope: 0 });
+  assert.deepEqual(c('Map Spread'), { family: 'maps_handicap', scope: 0 });
+  assert.deepEqual(c('Correct Score - Best of 3'), { family: 'correct_score', scope: 0 });
+  assert.deepEqual(c('Map 2 Kill Spread'), { family: 'map_kills_handicap', scope: 2 });
+  assert.deepEqual(c('Map 3 Total Kills'), { family: 'map_total_kills', scope: 3 });
+  assert.deepEqual(c('Map 1 First Inhibitor Destroyed'),
+    { family: 'first_inhibitor', scope: 1 });
+  assert.deepEqual(c('Map 2 Race To 10 Kills'),
+    { family: 'race_to_10_kills', scope: 2 });
+  assert.deepEqual(c('Liquid To Win A Map'),
+    { family: 'win_at_least_one_map', scope: 0, subject: 'Liquid' });
+  assert.equal(c('Map 1 - Will There Be A Penta Kill?'), null);
+});
+
+test('theScore Bet extracts exact fractional decimals and total lines', () => {
+  const event = {
+    id: 'evt', path: '/sport/lol/organization/international/competition/lcs/event/evt',
+    home: 'LYON', away: 'Team Liquid', homeKey: 'lyon', awayKey: 'liquid',
+  };
+  const drawer = { drawerChildren: [{ marketplaceShelfChildren: [{ markets: [{
+    id: 'Market:market', name: 'Map 2 Total Kills', status: 'OPEN', selections: [
+      {
+        id: 'MarketSelection:over', status: 'OPEN', type: 'OVER',
+        name: { fullName: 'Over 27.5', cleanName: 'Over' },
+        points: { decimalPoints: 27.5 },
+        odds: { numeratorLong: '47', denominatorLong: '27', formattedOdds: '-135' },
+      },
+      {
+        id: 'MarketSelection:under', status: 'OPEN', type: 'UNDER',
+        name: { fullName: 'Under 27.5', cleanName: 'Under' },
+        points: { decimalPoints: 27.5 },
+        odds: { numeratorLong: '21', denominatorLong: '11', formattedOdds: '-110' },
+      },
+    ],
+  }] }] }] };
+  const quotes = scorebet.extractQuotes(drawer, event, 'game_props');
+  assert.equal(quotes.length, 2);
+  assert.equal(quotes[0].family, 'map_total_kills');
+  assert.equal(quotes[0].scope, 2);
+  assert.equal(quotes[0].line, 27.5);
+  assert.ok(Math.abs(quotes[0].odds - 47 / 27) < 1e-12);
+  assert.equal(quotes[1].side, 'under');
+  assert.match(quotes[0].url, /#game_props$/);
+});
+
+test('theScore Bet competition cards become normalized fixtures', () => {
+  const fixtures = scorebet.eventSummaries({ fallbackEvent: {
+    id: 'StandardEvent:f8ee9e0e-f41c-4a59-8397-e83ad4f47d0d',
+    name: 'LYON vs Team Liquid', startTime: '2026-08-30T20:00:00Z', status: 'PRE_GAME',
+    competition: { name: 'LCS' },
+    homeParticipant: { fullName: 'LYON' },
+    awayParticipant: { fullName: 'Team Liquid' },
+    deepLink: { webUrl: '/sport/lol/organization/international/competition/lcs/event/f8ee9e0e-f41c-4a59-8397-e83ad4f47d0d' },
+  } });
+  assert.equal(fixtures.length, 1);
+  assert.equal(fixtures[0].book, 'scorebet');
+  assert.equal(fixtures[0].league, 'LCS');
+  assert.equal(fixtures[0].homeKey, 'lyon');
+  assert.equal(fixtures[0].awayKey, 'liquid');
+  assert.equal(fixtures[0].startTime, Date.parse('2026-08-30T20:00:00Z'));
 });
 
 test('bet99 types classify into the same families', () => {
@@ -695,6 +760,12 @@ test('bet365 is registered in the book list', () => {
   assert.ok(BOOKS.find((b) => b.id === 'bet365'));
 });
 
+test('theScore Bet is registered as an enabled direct book', () => {
+  const book = BOOKS.find((b) => b.id === 'scorebet');
+  assert.ok(book);
+  assert.equal(book.enabled, true);
+});
+
 test('market labels read sensibly', () => {
   assert.equal(marketLabel({ family: 'map_kills_handicap', scope: 1, subject: null }),
     'Kills Handicap · Map 1');
@@ -715,6 +786,8 @@ test('league names from every book fold onto one key', () => {
   assert.equal(canonicalLeague('LOL - LEC Summer'), 'LEC');
   assert.equal(canonicalLeague('LPL Split 3'), 'LPL');
   assert.equal(canonicalLeague('CBLOL Split 2'), 'CBLOL');
+  assert.equal(canonicalLeague('LFL Spring'), 'LFL');
+  assert.equal(canonicalLeague('Circuito Desafiante'), 'CIRCUITO DESAFIANTE');
   // The Challengers League must not collapse into the LCK proper.
   assert.notEqual(canonicalLeague('LCK CL'), 'LCK');
   // Untracked competitions pass through rather than being forced onto a key.
