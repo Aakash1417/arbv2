@@ -8,6 +8,7 @@
  * from the scan so a browser run never slows down the HTTP books.
  *
  *   node tools/bet365-scrape.js              scrape and write the snapshot
+ *   node tools/bet365-scrape.js --login      pause for a manual login first
  *   node tools/bet365-scrape.js --hours 24   only fixtures starting within 24h
  *   node tools/bet365-scrape.js --limit 3    stop after N fixtures
  *
@@ -45,8 +46,10 @@ const { Builder, By } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const dom = require('./bet365-dom');
 const { canonicalLeague } = require('../src/normalize');
+const { parseCouponTime } = require('../src/books/bet365');
 
-const COUPON_URL = 'https://www.bet365.com/#/AC/B151/C1/D50/E3/F163/';
+const LOGIN_URL = 'https://www.ab.bet365.ca/';
+const COUPON_URL = 'https://www.ab.bet365.ca/#/AC/B151/C1/D50/E3/F163/';
 const SNAPSHOT = path.join(__dirname, '..', 'data', 'bet365.json');
 const FIXTURE_SEL = '.ses-ParticipantFixtureDetailsEsports_TeamNames';
 
@@ -76,7 +79,7 @@ const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
 
 function parseArgs(argv) {
   const o = {
-    days: 1, limit: 0, headless: false, out: SNAPSHOT, url: COUPON_URL, tabs: 3,
+    days: 1, limit: 0, headless: false, login: false, out: SNAPSHOT, url: COUPON_URL, tabs: 3,
     // null = take every league the page lists (bar LPL). The page is the source
     // of truth; hardcoding a list silently drops competitions bet365 adds.
     leagues: null,
@@ -88,6 +91,7 @@ function parseArgs(argv) {
       case '--leagues': o.leagues = next().split(',').map((x) => x.trim().toUpperCase()); break;
       case '--limit': o.limit = Number(next()); break;
       case '--tabs': o.tabs = Math.max(1, Number(next())); break;
+      case '--login': o.login = true; break;
       case '--headless': o.headless = true; break;
       case '--out': o.out = next(); break;
       case '--url': o.url = next(); break;
@@ -106,6 +110,7 @@ bet365 LoL scraper -> data/bet365.json
   --leagues A,B   restrict to these leagues (default: every league on the page)
   --limit N       stop after N fixtures
   --tabs N        fixtures loaded concurrently (default 3)
+  --login         open Bet365, wait for manual login, then scrape in a new tab
   --headless      bet365 serves headless an empty shell; expect nothing
   --out FILE      snapshot path
 `;
@@ -115,6 +120,19 @@ function makeDriver(opts) {
   c.addArguments('--disable-blink-features=AutomationControlled', '--window-size=1600,1400', '--lang=en-CA');
   if (opts.headless) c.addArguments('--headless=new');
   return new Builder().forBrowser('chrome').setChromeOptions(c).build();
+}
+
+/** Pause an explicitly interactive run until the user confirms login. */
+async function waitForLoginConfirmation() {
+  if (!process.stdin.isTTY) throw new Error('--login requires an interactive terminal');
+  await new Promise((resolve) => {
+    process.stdout.write('Log in to Bet365 in Chrome, then press Enter here to start scraping… ');
+    process.stdin.resume();
+    process.stdin.once('data', () => {
+      process.stdin.pause();
+      resolve();
+    });
+  });
 }
 
 /** Poll (fast) until the market grid has painted, or the budget runs out. */
@@ -365,6 +383,7 @@ async function main() {
   let opts;
   try { opts = parseArgs(process.argv); } catch (e) { console.error(e.message, HELP); process.exit(1); }
   if (opts.help) return console.log(HELP);
+  if (opts.login && opts.headless) throw new Error('--login cannot be combined with --headless');
 
   let driver = await makeDriver(opts);
   const events = [];
@@ -374,6 +393,13 @@ async function main() {
   };
 
   try {
+    if (opts.login) {
+      console.log(`opening ${LOGIN_URL} for manual login…`);
+      await driver.get(LOGIN_URL);
+      await waitForLoginConfirmation();
+      await driver.switchTo().newWindow('tab');
+    }
+
     console.log('loading coupon…');
     await driver.get(opts.url);
     // The coupon has no market grid, so `waitRendered` cannot judge it — poll
@@ -464,7 +490,15 @@ async function main() {
         if (!t.out) { console.log(`${label} … ${t.error || 'never rendered'}`); continue; }
         const players = t.out.groups.filter((g) => /Player Total/i.test(g.title)).length;
         console.log(`${label} … ${t.out.groups.length} groups, ${players} player-prop`);
-        events.push({ league: r.league, home: r.home, away: r.away, time: r.time, ...t.out });
+        events.push({
+          league: r.league,
+          home: r.home,
+          away: r.away,
+          day: r.day,
+          time: r.time,
+          startTime: parseCouponTime(r.day, r.time, now),
+          ...t.out,
+        });
       }
       save();   // checkpoint per batch, so a later failure cannot discard work
     }

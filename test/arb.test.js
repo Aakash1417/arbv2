@@ -585,13 +585,28 @@ test('bet365 fixture times parse from Pacific into UTC', () => {
   assert.equal(bet365.parseHeaderTime('no time here', now), null);
 });
 
+test('bet365 coupon date and time parse from Alberta into UTC', () => {
+  const now = new Date('2026-08-29T00:00:00Z');
+  assert.equal(bet365.parseCouponTime('Sun Aug 30', '2:00 AM', now),
+    Date.parse('2026-08-30T08:00:00Z'));
+  assert.equal(bet365.parseCouponTime('', '2:00 AM', now), null);
+});
+
 const b365Event = (groups) => ({
   league: 'LOL - LCK', home: 'Dplus KIA', away: 'KT Rolster',
-  url: 'https://www.bet365.com/#/AC/B151/C1/D19/E2/F19/',
+  url: 'https://www.ab.bet365.ca/#/AC/B151/C1/D19/E2/F19/',
   header: 'LOL - LCK | Aug 9 1:00 AM | Dplus KIA vs KT Rolster',
   groups,
 });
 const NOW = Date.parse('2026-08-09T00:00:00Z');
+
+test('bet365 uses the saved coupon time when the Alberta page header has no date', () => {
+  const ev = b365Event([]);
+  ev.header = 'LOL - LCS Summer | A-Z | Next to Start | Australian Rules';
+  ev.startTime = Date.parse('2026-08-09T08:00:00Z');
+  const { event } = bet365.extractEvent(ev, { now: NOW });
+  assert.equal(event.startTime, ev.startTime);
+});
 
 test('bet365 player props zip prices onto the right player', () => {
   // The grid is label-aligned: cells[i] belongs to labels[i].
@@ -638,6 +653,19 @@ test('bet365 Match Lines splits into three markets', () => {
   // prefix inside the cell is what decides the side.
   assert.deepEqual(byFam('total_maps').map((q) => `${q.side}${q.line}@${q.odds}`),
     ['over2.5@1.9', 'under2.5@1.8']);
+});
+
+test('bet365 converts signed Alberta American prices to decimal', () => {
+  const { quotes } = bet365.extractEvent(b365Event([{
+    title: 'Match Lines',
+    labels: ['Total Maps'],
+    columns: [
+      { header: 'FURIA', cells: [{ hcap: 'O 2.5', odds: '+300' }] },
+      { header: 'Leviatan', cells: [{ hcap: 'U 2.5', odds: '-450' }] },
+    ],
+  }]), { now: NOW });
+  assert.equal(quotes[0].odds, 4);
+  assert.ok(Math.abs(quotes[1].odds - 1.2222222222) < 1e-9);
 });
 
 test('bet365 LPL fixtures are skipped', () => {

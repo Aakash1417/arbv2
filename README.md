@@ -250,9 +250,19 @@ any event page is loaded.
 Scraping is ~35s per fixture, so it runs separately and writes
 `data/bet365.json`; the scan just reads that snapshot and ignores it once it is
 older than two hours. **Leave the browser window alone while it runs.**
+Each event's coupon day and time are saved as an absolute timestamp, so a
+layout change in the event-page strapline cannot make valid odds disappear.
 
 ```bash
 node tools/bet365-scrape.js --hours 24
+```
+
+To log in before collecting account-visible prices, use interactive login mode.
+The scraper opens the Alberta site, waits for the login to finish, and starts
+the normal scrape in a new tab after Enter is pressed in the terminal:
+
+```bash
+node tools/bet365-scrape.js --login
 ```
 
 **LPL is skipped** — bet365 prices no LoL player props for it. Fixtures inside

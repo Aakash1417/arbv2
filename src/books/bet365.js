@@ -13,7 +13,7 @@
  *   node tools/bet365-scrape.js --hours 24
  *
  * Snapshot layout (see the scraper for how it is produced):
- *   { scrapedAt, events: [{ league, home, away, header, url, groups: [
+ *   { scrapedAt, events: [{ league, home, away, day, time, startTime, header, url, groups: [
  *       { title, labels: [...], columns: [{ header, cells: [{hcap, odds, name}] }] } ] }] }
  *
  * Every column's `cells[i]` belongs to `labels[i]` — bet365 renders markets as
@@ -25,6 +25,7 @@ const path = require('path');
 const { normalizeTeam, normalizePlayer, canonicalLeague } = require('../normalize');
 const { DEFAULT_KEYS } = require('../leagues');
 const { FAMILIES } = require('../markets');
+const { fromAmerican } = require('../odds');
 
 const SNAPSHOT = path.join(__dirname, '..', '..', 'data', 'bet365.json');
 
@@ -36,6 +37,9 @@ const SKIP_LEAGUE = /\bLPL\b/i;
 
 /** The site renders fixture times in US Pacific. */
 const SITE_TZ = 'America/Los_Angeles';
+
+/** The Alberta coupon renders its fixture clock in Mountain time. */
+const COUPON_TZ = 'America/Edmonton';
 
 /**
  * Parse "LOL - LCK | Aug 9 1:00 AM | Dplus KIA vs KT Rolster | ..." into epoch
@@ -61,6 +65,33 @@ function parseHeaderTime(header, now = new Date()) {
 
   // Shift the naive UTC reading by the site's offset on that date.
   return guess + tzOffsetMs(guess, SITE_TZ);
+}
+
+/** Parse the coupon's separate date heading and fixture time into epoch ms. */
+function parseCouponTime(day, time, now = new Date()) {
+  const dm = /([A-Z][a-z]{2})\s+(\d{1,2})/i.exec(String(day || ''));
+  const tm = /(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(String(time || ''));
+  if (!dm || !tm) return null;
+
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const mon = months.indexOf(dm[1].toLowerCase());
+  if (mon < 0) return null;
+
+  let hour = Number(tm[1]);
+  if (tm[3]) {
+    const pm = /pm/i.test(tm[3]);
+    if (pm && hour !== 12) hour += 12;
+    if (!pm && hour === 12) hour = 0;
+  }
+
+  let year = now.getUTCFullYear();
+  let guess = Date.UTC(year, mon, Number(dm[2]), hour, Number(tm[2]));
+  let result = guess + tzOffsetMs(guess, COUPON_TZ);
+  if (result < now.getTime() - 182 * 864e5) {
+    guess = Date.UTC(++year, mon, Number(dm[2]), hour, Number(tm[2]));
+    result = guess + tzOffsetMs(guess, COUPON_TZ);
+  }
+  return result;
 }
 
 /** How far `tz` is behind UTC at `ms`, in milliseconds. */
@@ -111,7 +142,11 @@ function classifyGroup(title) {
 }
 
 const price = (v) => {
-  const n = Number(String(v || '').trim());
+  const raw = String(v || '').trim().replace(/\u2212/g, '-');
+  const n = Number(raw);
+  // The Alberta site displays signed American odds. Older snapshots used
+  // unsigned decimal odds, so the explicit sign is the format discriminator.
+  if (/^[+-]\d+(?:\.\d+)?$/.test(raw)) return fromAmerican(n);
   return Number.isFinite(n) && n > 1 ? n : null;
 };
 const numeric = (v) => {
@@ -141,7 +176,10 @@ function extractEvent(ev, { now = Date.now() } = {}) {
   if (!ev.home || !ev.away) return { event: null, quotes: [] };
   if (SKIP_LEAGUE.test(ev.league || '')) return { event: null, quotes: [] };
 
-  const startTime = parseHeaderTime(ev.header, new Date(now));
+  const savedStartTime = Number(ev.startTime);
+  const startTime = Number.isFinite(savedStartTime) && savedStartTime > 0
+    ? savedStartTime
+    : parseHeaderTime(ev.header, new Date(now));
   if (!startTime) return { event: null, quotes: [] };
 
   const event = {
@@ -154,7 +192,7 @@ function extractEvent(ev, { now = Date.now() } = {}) {
     homeKey: normalizeTeam(ev.home),
     awayKey: normalizeTeam(ev.away),
     startTime,
-    url: ev.url || 'https://www.bet365.com/#/AC/B151/',
+    url: ev.url || 'https://www.ab.bet365.ca/#/AC/B151/',
   };
 
   const quotes = [];
@@ -317,6 +355,6 @@ async function collect({
 }
 
 module.exports = {
-  collect, extractEvent, classifyGroup, parseHeaderTime, readSnapshot,
+  collect, extractEvent, classifyGroup, parseHeaderTime, parseCouponTime, readSnapshot,
   SNAPSHOT, DEFAULT_MAX_AGE_MS,
 };
