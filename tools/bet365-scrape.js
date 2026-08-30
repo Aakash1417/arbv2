@@ -55,8 +55,14 @@ const PLAYER_ROUTE = 'I11/';
 
 const SKIP_LEAGUE = /\bLPL\b/i;
 
-/** bet365's SPA needs a moment after a load before it will answer scripts. */
+/** Leave the SPA untouched while its initial boot finishes. */
 const SETTLE_MS = 6000;
+
+/** How often to check whether a coupon or event page has finished rendering. */
+const POLL_MS = 1000;
+
+/** Maximum time to wait for a fixture click or coupon return to take effect. */
+const ROUTE_WAIT_MS = 5000;
 
 /**
  * Per-tab render budget when several are booting together. Loading N tabs at
@@ -70,7 +76,7 @@ const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
 
 function parseArgs(argv) {
   const o = {
-    days: 1, limit: 0, headless: false, out: SNAPSHOT, url: COUPON_URL, tabs: 4,
+    days: 1, limit: 0, headless: false, out: SNAPSHOT, url: COUPON_URL, tabs: 3,
     // null = take every league the page lists (bar LPL). The page is the source
     // of truth; hardcoding a list silently drops competitions bet365 adds.
     leagues: null,
@@ -99,7 +105,7 @@ bet365 LoL scraper -> data/bet365.json
                   headings in local time (default 1 = today and tomorrow)
   --leagues A,B   restrict to these leagues (default: every league on the page)
   --limit N       stop after N fixtures
-  --tabs N        fixtures loaded concurrently (default 4)
+  --tabs N        fixtures loaded concurrently (default 3)
   --headless      bet365 serves headless an empty shell; expect nothing
   --out FILE      snapshot path
 `;
@@ -117,9 +123,9 @@ async function waitRendered(driver, seconds) {
   while (Date.now() < end) {
     try {
       const s = await driver.executeScript(dom.renderState);
-      if (s.groups > 0 && s.odds > 4) return s;
+      if (s.groups > 0 && s.odds > 0) return s;
     } catch { /* mid-reload — the document is briefly gone; keep polling */ }
-    await sleep(700);
+    await sleep(POLL_MS);
   }
   return null;
 }
@@ -136,8 +142,8 @@ async function waitRendered(driver, seconds) {
 async function loadEvent(driver, url, read, { seconds = 12 } = {}) {
   await driver.get(url);
   await driver.navigate().refresh();
-  // Let the SPA boot before touching it. Polling executeScript straight
-  // through a cold start reliably yields an empty page; waiting first does not.
+  // Executing scripts during Bet365's cold boot can leave an empty page.
+  // Preserve this no-touch window, then poll so we move on as soon as ready.
   await sleep(SETTLE_MS);
   if (!await waitRendered(driver, seconds)) return null;
   return read();
@@ -148,8 +154,7 @@ async function loadEvent(driver, url, read, { seconds = 12 } = {}) {
  * so readiness has to be judged on the fixtures themselves.
  */
 async function waitCoupon(driver, seconds) {
-  // Let the SPA boot before touching it. Polling executeScript through the
-  // cold start reliably yields an empty coupon; waiting first does not.
+  // The coupon needs the same protected cold-boot window as an event page.
   await sleep(SETTLE_MS);
   const end = Date.now() + seconds * 1000;
   let last = { fixtures: [], leagues: [] };
@@ -163,7 +168,7 @@ async function waitCoupon(driver, seconds) {
       // Report once: a persistent failure here looks identical to "no fixtures".
       if (!reported) { console.log(`  (coupon read: ${firstLine(err)})`); reported = true; }
     }
-    await sleep(1500);
+    await sleep(POLL_MS);
   }
   return last;
 }
@@ -196,24 +201,58 @@ function localDay(days, now = new Date()) {
   return d;
 }
 
+/** Click a fixture, reacquiring its node if Bet365 rerenders the coupon. */
+async function clickFixture(driver, index, couponUrl) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const els = await driver.findElements(By.css(FIXTURE_SEL));
+    const el = els[index];
+    if (!el) return false;
+    try {
+      await driver.executeScript('arguments[0].scrollIntoView({block:"center"});', el);
+      await sleep(150);
+      await el.click();
+      return true;
+    } catch (err) {
+      lastError = err;
+      // The click may have succeeded just before the old element went stale.
+      try { if ((await driver.getCurrentUrl()) !== couponUrl) return true; }
+      catch { /* a dead driver will be reported by the final retry */ }
+    }
+  }
+  throw lastError;
+}
+
 /** Click each fixture to learn its route, then step back to the coupon. */
 async function harvestRoutes(driver, fixtures) {
   const routes = [];
   for (const f of fixtures) {
+    let couponUrl = null;
     try {
-      const els = await driver.findElements(By.css(FIXTURE_SEL));
-      const el = els[f.index];
-      if (!el) continue;
-      await driver.executeScript('arguments[0].scrollIntoView({block:"center"});', el);
-      await sleep(150);
-      await el.click();
-      await sleep(1200);
+      couponUrl = await driver.getCurrentUrl();
+      if (!await clickFixture(driver, f.index, couponUrl)) continue;
+
+      // A hash-route change is the reliable signal that the click took effect;
+      // a fixed sleep is either wasteful or too short on a busy SPA.
+      await driver.wait(async () => (await driver.getCurrentUrl()) !== couponUrl, ROUTE_WAIT_MS);
       const url = await driver.getCurrentUrl();
-      await driver.navigate().back();
-      await sleep(1000);
-      if (url && url !== COUPON_URL) routes.push({ ...f, url });
+      if (url && url !== couponUrl) routes.push({ ...f, url });
     } catch (err) {
       console.log(`  ! ${f.home} vs ${f.away}: ${firstLine(err)}`);
+    } finally {
+      // If the click left the coupon, restore it and wait for its fixtures
+      // rather than assuming a fixed back-navigation delay was sufficient.
+      try {
+        if (couponUrl && (await driver.getCurrentUrl()) !== couponUrl) {
+          await driver.navigate().back();
+          await driver.wait(async () => {
+            try { return (await driver.findElements(By.css(FIXTURE_SEL))).length > 0; }
+            catch { return false; }
+          }, ROUTE_WAIT_MS);
+        }
+      } catch (err) {
+        console.log(`  ! coupon restore after ${f.home} vs ${f.away}: ${firstLine(err)}`);
+      }
     }
   }
   return routes;
@@ -250,9 +289,9 @@ function mergeGroups(out, extra) {
  *
  * One WebDriver session serialises its commands, so this does not run scripts
  * concurrently — what it overlaps is the *waiting*. Every tab is told to load,
- * then they all boot at the same time while we settle once, and only then are
- * they read one after another. Since almost all the per-fixture cost is waiting
- * for bet365's SPA to come up, N tabs cut the wall time by roughly N.
+ * then they all boot at the same time while readiness is checked round-robin.
+ * Since almost all the per-fixture cost is waiting for bet365's SPA to come up,
+ * N tabs cut the wall time by roughly N.
  *
  * Each URL still gets `get()` + `refresh()`, because a hash-only change alone
  * never repaints.
@@ -272,7 +311,8 @@ async function scrapeBatch(driver, routes, home) {
         await driver.navigate().refresh();
       } catch (err) { t.error = firstLine(err); }
     }
-    // One settle for the whole batch — they are all booting in parallel.
+    // All tabs boot together; do not inject readiness scripts until Bet365's
+    // protected startup window has elapsed.
     await sleep(SETTLE_MS);
   };
 
@@ -294,16 +334,16 @@ async function scrapeBatch(driver, routes, home) {
         try {
           await driver.switchTo().window(t.handle);
           const s = await driver.executeScript(dom.renderState);
-          if (s.groups > 0 && s.odds > 4) {
+          if (s.groups > 0 && s.odds > 0) {
             onRead(t, await driver.executeScript(dom.readGroups));
             finished.add(t);
           }
-        } catch (err) {
-          t.error = firstLine(err);
-          finished.add(t);
+        } catch {
+          // A document can disappear briefly during reload. Leave the tab in
+          // the round-robin so the next one-second poll can try it again.
         }
       }
-      if (finished.size < pending.length) await sleep(700);
+      if (finished.size < pending.length) await sleep(POLL_MS);
     }
   };
 
@@ -375,26 +415,49 @@ async function main() {
     const started = Date.now();
     console.log(`\nscraping ${routes.length} fixtures, ${opts.tabs} at a time…`);
 
+    batches:
     for (let i = 0; i < routes.length; i += opts.tabs) {
       const batch = routes.slice(i, i + opts.tabs);
-      let done;
-      try {
-        done = await scrapeBatch(driver, batch, home);
-      } catch (err) {
-        console.log(`  ! batch failed: ${firstLine(err)}`);
-        // Several heavy tabs can take Chrome down with them. Every route is
-        // already harvested, so a fresh browser just carries on from here.
-        try { await driver.quit(); } catch { /* already gone */ }
+      let done = null;
+
+      // If several heavy tabs take Chrome down, restart it and retry this same
+      // batch once. Previously the failed batch was silently skipped.
+      for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          driver = await makeDriver(opts);
-          home = await driver.getWindowHandle();
-          console.log('    (browser restarted)');
-        } catch (e) {
-          console.log(`    ! could not restart: ${firstLine(e)}`);
+          done = await scrapeBatch(driver, batch, home);
           break;
+        } catch (err) {
+          console.log(`  ! batch failed${attempt === 2 ? ' again' : ''}: ${firstLine(err)}`);
+          try { await driver.quit(); } catch { /* already gone */ }
+          try {
+            driver = await makeDriver(opts);
+            home = await driver.getWindowHandle();
+            console.log('    (browser restarted)');
+          } catch (e) {
+            console.log(`    ! could not restart: ${firstLine(e)}`);
+            break batches;
+          }
+          if (attempt === 1) console.log('    retrying failed batch once…');
         }
+      }
+
+      if (!done) {
+        console.log('    batch abandoned after retry');
         continue;
       }
+
+      // Preserve the fast parallel pass, then give only missed fixtures a
+      // dedicated serial retry using the existing refresh-and-poll path.
+      for (const t of done) {
+        if (t.out) continue;
+        console.log(`  retrying ${t.route.home} vs ${t.route.away} serially…`);
+        try {
+          t.out = await scrapeEvent(driver, t.route.url);
+        } catch (err) {
+          console.log(`    retry failed: ${firstLine(err)}`);
+        }
+      }
+
       for (const t of done) {
         const r = t.route;
         const label = `[${routes.indexOf(r) + 1}/${routes.length}] ${r.home} vs ${r.away}`;
