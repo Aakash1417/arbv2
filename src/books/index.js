@@ -20,7 +20,7 @@ const scorebet = require('./scorebet');
 
 const BOOKS = [
     { id: 'betway', label: 'Betway', enabled: true, mod: betway },
-    { id: 'scorebet', label: 'theScore Bet', enabled: true, mod: scorebet },
+    { id: 'scorebet', label: 'theScore Bet', enabled: false, mod: scorebet },
     { id: 'bet99', label: 'BET99', enabled: false, mod: bet99 },
     { id: 'ozoon', label: 'Ozoon', enabled: false, mod: ozoon },
     // Scraped by tools/bet365-scrape.js into data/bet365.json; this reads that.

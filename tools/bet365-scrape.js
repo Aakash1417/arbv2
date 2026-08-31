@@ -241,13 +241,59 @@ async function clickFixture(driver, index, couponUrl) {
   throw lastError;
 }
 
+async function hasCouponFixtures(driver) {
+  try { return (await driver.findElements(By.css(FIXTURE_SEL))).length > 0; }
+  catch { return false; }
+}
+
+/**
+ * Force the SPA back onto the coupon when hash-history navigation leaves an
+ * empty document. `get()` alone can be a same-document no-op, so refresh and
+ * use the normal coupon poll before declaring recovery successful.
+ */
+async function reloadCoupon(driver, couponUrl, seconds = 30) {
+  await driver.get(couponUrl);
+  await driver.navigate().refresh();
+  const restored = await waitCoupon(driver, seconds);
+  if (!restored.fixtures.length) throw new Error('coupon reload returned no fixtures');
+  return restored.fixtures.length;
+}
+
+/** Back up to the coupon, falling back to a full coupon reload if needed. */
+async function restoreCoupon(driver, couponUrl) {
+  if ((await driver.getCurrentUrl()) !== couponUrl) await driver.navigate().back();
+  try {
+    await driver.wait(() => hasCouponFixtures(driver), ROUTE_WAIT_MS);
+    return { reloaded: false };
+  } catch (backError) {
+    const fixtures = await reloadCoupon(driver, couponUrl);
+    return { reloaded: true, fixtures, backError };
+  }
+}
+
 /** Click each fixture to learn its route, then step back to the coupon. */
 async function harvestRoutes(driver, fixtures) {
   const routes = [];
+  // Keep the known coupon route for the whole pass. If one `back()` leaves a
+  // blank coupon, using the current URL on the next iteration would make the
+  // event route (or blank hash state) the new baseline and skip everything.
+  const couponUrl = await driver.getCurrentUrl();
+  let couponAvailable = await hasCouponFixtures(driver);
+
   for (const f of fixtures) {
-    let couponUrl = null;
+    if (!couponAvailable) {
+      try {
+        const count = await reloadCoupon(driver, couponUrl);
+        console.log(`  coupon recovered before ${f.home} vs ${f.away} (${count} fixtures)`);
+        couponAvailable = true;
+      } catch (err) {
+        console.log(`  ! coupon recovery failed before ${f.home} vs ${f.away}: ${firstLine(err)}`);
+        console.log('  ! route harvesting stopped; remaining fixtures were not silently skipped');
+        break;
+      }
+    }
+
     try {
-      couponUrl = await driver.getCurrentUrl();
       if (!await clickFixture(driver, f.index, couponUrl)) continue;
 
       // A hash-route change is the reliable signal that the click took effect;
@@ -259,16 +305,18 @@ async function harvestRoutes(driver, fixtures) {
       console.log(`  ! ${f.home} vs ${f.away}: ${firstLine(err)}`);
     } finally {
       // If the click left the coupon, restore it and wait for its fixtures
-      // rather than assuming a fixed back-navigation delay was sufficient.
+      // rather than assuming a fixed back-navigation delay was sufficient. A
+      // blank coupon is explicitly reloaded so the remaining routes survive.
       try {
-        if (couponUrl && (await driver.getCurrentUrl()) !== couponUrl) {
-          await driver.navigate().back();
-          await driver.wait(async () => {
-            try { return (await driver.findElements(By.css(FIXTURE_SEL))).length > 0; }
-            catch { return false; }
-          }, ROUTE_WAIT_MS);
+        if ((await driver.getCurrentUrl()) !== couponUrl || !await hasCouponFixtures(driver)) {
+          const restored = await restoreCoupon(driver, couponUrl);
+          couponAvailable = true;
+          if (restored.reloaded) {
+            console.log(`  coupon reloaded after ${f.home} vs ${f.away} (${restored.fixtures} fixtures)`);
+          }
         }
       } catch (err) {
+        couponAvailable = false;
         console.log(`  ! coupon restore after ${f.home} vs ${f.away}: ${firstLine(err)}`);
       }
     }

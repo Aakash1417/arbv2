@@ -58,7 +58,8 @@ test('formatArbBlock renders exact arb with legs, odds, and links', () => {
   assert.ok(formatted.includes('ShowMaker Player Total Kills · Map 1'));
   assert.ok(formatted.includes('• OVER 3.5: <code>+160</code> on <a href="https://betway.com/event/123">betway</a> — Bet: <b>$'));
   assert.ok(formatted.includes('• UNDER 3.5: <code>-135</code> on <a href="https://bet99.com/event/456">bet99</a> — Bet: <b>$'));
-  assert.ok(formatted.includes('BET99 Target Win:</b> $'));
+  assert.ok(formatted.includes('Betway Target Win:</b> $480.00'));
+  assert.ok(!formatted.includes('BET99 Target Win'));
   assert.ok(formatted.includes('Max Profit:</b> $'));
 });
 

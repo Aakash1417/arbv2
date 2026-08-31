@@ -172,79 +172,38 @@ function marketLabel(arb) {
   return `${base} · ${scope}`;
 }
 
-/**
- * Determines BET99 target win amount based on match start time relative to current time.
- * - 12 to 24 hours before match (or >= 12h): win $100
- * - Between 12 and 1 hour before: win $200
- * - Within 1 hour before match (or live/in-progress): win $400
- */
-function calculateBet99TargetWin(startTimeMs, nowMs = Date.now()) {
-  if (!startTimeMs) return 100;
-  const hoursToMatch = (startTimeMs - nowMs) / (3600 * 1000);
-  if (hoursToMatch >= 12) {
-    return 100;
-  } else if (hoursToMatch > 1) {
-    return 200;
-  } else {
-    return 400;
-  }
-}
+const BETWAY_TARGET_WIN = 480;
 
 /**
  * Calculates platform-specific sizing and max profit for an arbitrage opportunity.
- * Targets Bet99 win amount ($100/$200/$400) and calculates the required bet on Betway
- * (or other legs) to achieve equal payout hedging and maximum guaranteed profit.
+ * The Betway leg is the sole betting-limit anchor: stake enough to win $480 net,
+ * then size every other leg to return the same total payout.
  */
-function calculatePlatformSizing(arb, nowMs = Date.now()) {
-  const startTimeMs = arb.event?.startTime;
-  const targetWin = calculateBet99TargetWin(startTimeMs, nowMs);
-
+function calculatePlatformSizing(arb) {
   const legs = arb.legs || [];
-  const bet99Leg = legs.find((l) => l.book && l.book.toLowerCase() === 'bet99');
   const betwayLeg = legs.find((l) => l.book && l.book.toLowerCase() === 'betway');
 
-  if (bet99Leg && bet99Leg.odds > 1) {
-    const bet99Stake = round2(targetWin / (bet99Leg.odds - 1));
-    const payout = round2(bet99Stake * bet99Leg.odds);
-
-    const legStakes = {};
-    let totalStake = 0;
-
-    legs.forEach((leg) => {
-      const bName = leg.book;
-      if (bName && bName.toLowerCase() === 'bet99') {
-        legStakes[bName] = bet99Stake;
-        totalStake += bet99Stake;
-      } else {
-        const legStake = round2(payout / leg.odds);
-        legStakes[bName] = legStake;
-        totalStake += legStake;
-      }
-    });
-
-    totalStake = round2(totalStake);
-    const maxProfit = round2(payout - totalStake);
-
+  // Opportunities without Betway have no applicable betting limit, so do not
+  // present made-up stake advice for them.
+  if (!betwayLeg || !(betwayLeg.odds > 1)) {
     return {
-      targetWin,
-      bet99Stake,
-      betwayStake: betwayLeg ? (legStakes[betwayLeg.book] || 0) : (legStakes['betway'] || 0),
-      legStakes,
-      payout,
-      totalStake,
-      maxProfit,
-      hoursToMatch: startTimeMs ? (startTimeMs - nowMs) / (3600 * 1000) : null,
+      targetWin: null,
+      betwayTargetWin: null,
+      betwayStake: 0,
+      legStakes: {},
+      payout: 0,
+      totalStake: 0,
+      maxProfit: 0,
     };
   }
 
-  const primaryLeg = legs[0];
-  const primaryStake = primaryLeg && primaryLeg.odds > 1 ? round2(targetWin / (primaryLeg.odds - 1)) : 100;
-  const payout = primaryLeg ? round2(primaryStake * primaryLeg.odds) : 100;
+  const betwayStake = round2(BETWAY_TARGET_WIN / (betwayLeg.odds - 1));
+  const payout = round2(betwayStake * betwayLeg.odds);
 
   const legStakes = {};
   let totalStake = 0;
   legs.forEach((leg) => {
-    const legStake = round2(payout / leg.odds);
+    const legStake = leg === betwayLeg ? betwayStake : round2(payout / leg.odds);
     legStakes[leg.book] = legStake;
     totalStake += legStake;
   });
@@ -253,20 +212,21 @@ function calculatePlatformSizing(arb, nowMs = Date.now()) {
   const maxProfit = round2(payout - totalStake);
 
   return {
-    targetWin,
-    bet99Stake: 0,
-    betwayStake: legStakes['betway'] || 0,
+    // Keep targetWin as the generic persisted field while making its platform
+    // explicit to callers and output formatters.
+    targetWin: BETWAY_TARGET_WIN,
+    betwayTargetWin: BETWAY_TARGET_WIN,
+    betwayStake,
     legStakes,
     payout,
     totalStake,
     maxProfit,
-    hoursToMatch: startTimeMs ? (startTimeMs - nowMs) / (3600 * 1000) : null,
   };
 }
 
 module.exports = {
   findArbs, findLineArbs, findCategoricalArbs, stakes, invSum, dedupeBest, marketLabel,
-  calculateBet99TargetWin, calculatePlatformSizing,
+  BETWAY_TARGET_WIN, calculatePlatformSizing,
   isMarginFamily,
 };
 

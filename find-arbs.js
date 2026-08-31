@@ -157,7 +157,9 @@ function render(result, opts) {
       `           both legs win between ${a.middleRange[0]} and ${a.middleRange[1]}`,
     );
     if (a.pushRisk) console.log('           note: whole-number line, a tie pushes.');
-    console.log(`           Target Win (BET99): $${sizing.targetWin.toFixed(2)} | Total Bet: $${sizing.totalStake.toFixed(2)} | Max Profit: $${sizing.maxProfit.toFixed(2)}`);
+    if (sizing.betwayTargetWin !== null) {
+      console.log(`           Betway Target Win: $${sizing.betwayTargetWin.toFixed(2)} | Total Bet: $${sizing.totalStake.toFixed(2)} | Max Profit: $${sizing.maxProfit.toFixed(2)}`);
+    }
     // Per-leg links: each goes straight to the book and market tab you bet on.
     a.legs.forEach((l) => console.log(`           ${l.book.padEnd(7)}-> ${l.url}`));
     console.log();

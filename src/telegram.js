@@ -80,7 +80,9 @@ function formatArbBlock(arb, tz = 'America/Edmonton', nowMs = Date.now()) {
     out += `Both legs win between ${arb.middleRange[0]} and ${arb.middleRange[1]}\n`;
   }
 
-  out += `🎯 <b>BET99 Target Win:</b> $${sizing.targetWin.toFixed(2)} | <b>Total Bet:</b> $${sizing.totalStake.toFixed(2)} | <b>Max Profit:</b> $${sizing.maxProfit.toFixed(2)}\n`;
+  if (sizing.betwayTargetWin !== null) {
+    out += `🎯 <b>Betway Target Win:</b> $${sizing.betwayTargetWin.toFixed(2)} | <b>Total Bet:</b> $${sizing.totalStake.toFixed(2)} | <b>Max Profit:</b> $${sizing.maxProfit.toFixed(2)}\n`;
+  }
 
   return out;
 }

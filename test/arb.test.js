@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { findArbs, stakes, invSum, marketLabel, calculateBet99TargetWin, calculatePlatformSizing } = require('../src/arb');
+const { findArbs, stakes, invSum, marketLabel, BETWAY_TARGET_WIN, calculatePlatformSizing } = require('../src/arb');
 const betway = require('../src/books/betway');
 const bet99 = require('../src/books/bet99');
 const { clusterEvents, groupMarkets, resolveQuote, sideOf } = require('../src/match');
@@ -760,10 +760,10 @@ test('bet365 is registered in the book list', () => {
   assert.ok(BOOKS.find((b) => b.id === 'bet365'));
 });
 
-test('theScore Bet is registered as an enabled direct book', () => {
+test('theScore Bet is registered as a direct book', () => {
   const book = BOOKS.find((b) => b.id === 'scorebet');
   assert.ok(book);
-  assert.equal(book.enabled, true);
+  assert.equal(book.mod, scorebet);
 });
 
 test('market labels read sensibly', () => {
@@ -805,43 +805,34 @@ test('betway is queried by slug, other books by league key', () => {
 
 // ------------------------------------------------------------- platform sizing
 
-test('calculateBet99TargetWin selects correct target win based on match start time', () => {
-  const now = 1000000000000;
-  const hourMs = 3600 * 1000;
-
-  // 18 hours in future (12-24h window) -> $100
-  assert.equal(calculateBet99TargetWin(now + 18 * hourMs, now), 100);
-
-  // 12 hours in future (>=12h boundary) -> $100
-  assert.equal(calculateBet99TargetWin(now + 12 * hourMs, now), 100);
-
-  // 5 hours in future (1-12h window) -> $200
-  assert.equal(calculateBet99TargetWin(now + 5 * hourMs, now), 200);
-
-  // 30 minutes in future (<=1h window) -> $400
-  assert.equal(calculateBet99TargetWin(now + 0.5 * hourMs, now), 400);
-
-  // Already started (live match) -> $400
-  assert.equal(calculateBet99TargetWin(now - 1 * hourMs, now), 400);
-});
-
-test('calculatePlatformSizing computes betway stake and max profit given bet99 target win', () => {
-  const now = 1000000000000;
-  const hourMs = 3600 * 1000;
-
+test('calculatePlatformSizing stakes Betway to win the fixed $480 limit', () => {
   const mockArb = {
-    event: { startTime: now + 5 * hourMs }, // 5h -> target win = $200
     legs: [
-      { book: 'bet99', odds: 2.10, label: 'OVER 2.5' },  // profit ratio 1.10 -> bet99 stake = 200 / 1.10 = 181.82, payout = 381.82
-      { book: 'betway', odds: 2.05, label: 'UNDER 2.5' }, // betway stake = 381.82 / 2.05 = 186.25
+      { book: 'bet99', odds: 2.10, label: 'OVER 2.5' },
+      { book: 'betway', odds: 2.05, label: 'UNDER 2.5' },
     ],
   };
 
-  const res = calculatePlatformSizing(mockArb, now);
-  assert.equal(res.targetWin, 200);
-  assert.equal(res.bet99Stake, 181.82);
-  assert.equal(res.betwayStake, 186.25);
-  assert.equal(res.totalStake, 368.07);
-  assert.equal(res.maxProfit, 13.75);
+  const res = calculatePlatformSizing(mockArb);
+  assert.equal(BETWAY_TARGET_WIN, 480);
+  assert.equal(res.targetWin, 480);
+  assert.equal(res.betwayTargetWin, 480);
+  assert.equal(res.betwayStake, 457.14);
+  assert.equal(res.legStakes.bet99, 446.26);
+  assert.equal(res.totalStake, 903.40);
+  assert.equal(res.maxProfit, 33.74);
+  assert.equal(Math.round(res.betwayStake * (2.05 - 1) * 100) / 100, 480);
+});
+
+test('calculatePlatformSizing does not invent limit-based stakes without Betway', () => {
+  const res = calculatePlatformSizing({
+    legs: [
+      { book: 'bet99', odds: 2.10 },
+      { book: 'bet365', odds: 2.05 },
+    ],
+  });
+
+  assert.equal(res.betwayTargetWin, null);
+  assert.deepEqual(res.legStakes, {});
 });
 
