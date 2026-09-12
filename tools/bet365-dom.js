@@ -97,7 +97,103 @@ function readCoupon() {
   // One row per fixture even if it appears in several nested containers.
   const seen = new Set();
   const unique = fixtures.filter((f) => !seen.has(f.index) && seen.add(f.index));
-  return { url: location.href, fixtures: unique, leagues: [...new Set(unique.map((f) => f.league))] };
+  if (unique.length) {
+    return { url: location.href, fixtures: unique, leagues: [...new Set(unique.map((f) => f.league))] };
+  }
+
+  /*
+   * The redesigned coupon uses generated `ycl-*`/`rrc-*` class names. Those
+   * hashes are deliberately not selectors here: identify the same semantic
+   * structure instead — one league heading, date headings, a kickoff clock,
+   * and a two-child team-name container. This was validated against the live
+   * September 2026 coupon while retaining the legacy reader above.
+   */
+  const DAY = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}$/i;
+  const TIME = /^\d{1,2}:\d{2}(?:\s*[AP]M)?$/i;
+  const BAD_NAME = /^(?:LOL(?:\s*-.*)?|Live|Join|Log In|1|2|Draw|Over|Under)$/i;
+  const allElements = [...document.querySelectorAll('*')];
+  const elementOrder = new Map(allElements.map((el, i) => [el, i]));
+  const divs = [...document.querySelectorAll('div')];
+  const deepestMatching = (pattern) => allElements.filter((el) =>
+    pattern.test(t(el)) && ![...el.children].some((child) => t(child) === t(el)));
+  const leagueHeadings = deepestMatching(/^LOL\s*-\s*[^\n]+$/i);
+  const dayHeadings = deepestMatching(DAY);
+  const validTeamName = (name) => name.length >= 2 && name.length <= 80
+    && !name.includes('\n') && !DAY.test(name) && !TIME.test(name)
+    && !BAD_NAME.test(name) && !/^[+$-]?\d+(?:\.\d+)?$/.test(name);
+
+  const structural = [];
+  for (const pair of divs) {
+    const children = [...pair.children];
+    if (children.length !== 2) continue;
+    const names = children.map(t);
+    if (!names.every(validTeamName) || names[0] === names[1]) continue;
+
+    // The smallest ancestor containing exactly one LOL heading is this
+    // fixture's competition section. Navigation/footer pairs never qualify.
+    let section = pair.parentElement;
+    let league = '';
+    while (section) {
+      const headings = leagueHeadings.filter((heading) => section.contains(heading));
+      if (headings.length === 1) { league = t(headings[0]); break; }
+      section = section.parentElement;
+    }
+    if (!section || !league) continue;
+
+    const priorDays = dayHeadings.filter((heading) =>
+      section.contains(heading) && elementOrder.get(heading) < elementOrder.get(pair));
+    const day = priorDays.length ? t(priorDays[priorDays.length - 1]) : '';
+
+    let time = '';
+    for (let node = pair.parentElement; node && node !== section; node = node.parentElement) {
+      const hit = [...node.querySelectorAll('*')].find((el) =>
+        TIME.test(t(el)) && ![...el.children].some((child) => t(child) === t(el)));
+      if (hit) { time = t(hit); break; }
+    }
+
+    // Live rows display a two-number score beside the team pair. Their clock
+    // is elapsed game time, not kickoff time, so leave it blank and let the
+    // scraper's existing closed/no-time filter drop the row.
+    const scoreText = pair.parentElement && pair.parentElement.children.length > 1
+      ? t(pair.parentElement.children[1]) : '';
+    if (/^\d+\s*\n\s*\d+$/.test(scoreText)) time = '';
+
+    structural.push({
+      index: structural.length,
+      league,
+      home: names[0],
+      away: names[1],
+      time,
+      day,
+    });
+  }
+
+  return {
+    url: location.href,
+    fixtures: structural,
+    leagues: [...new Set(structural.map((f) => f.league))],
+  };
+}
+
+/** Return the clickable team-pair node for either coupon generation. */
+function findCouponFixture(home, away) {
+  const t = (e) => ((e && e.innerText) || '').trim();
+  const wantedHome = String(home || '').trim();
+  const wantedAway = String(away || '').trim();
+
+  const legacy = [...document.querySelectorAll('.ses-ParticipantFixtureDetailsEsports_TeamNames')]
+    .find((el) => {
+      const names = t(el).split('\n').map((s) => s.trim()).filter(Boolean);
+      return names[0] === wantedHome && names[1] === wantedAway;
+    });
+  if (legacy) return legacy;
+
+  return [...document.querySelectorAll('div')].find((el) => {
+    const children = [...el.children];
+    return children.length === 2
+      && t(children[0]) === wantedHome
+      && t(children[1]) === wantedAway;
+  }) || null;
 }
 
 /** Names of the market-group tabs ("Main Markets", "Player", "Map 1", …). */
@@ -184,4 +280,4 @@ function readGroups() {
   return { url: location.href, header, groups };
 }
 
-module.exports = { readCoupon, readNavTabs, clickNavTab, renderState, readGroups };
+module.exports = { readCoupon, findCouponFixture, readNavTabs, clickNavTab, renderState, readGroups };

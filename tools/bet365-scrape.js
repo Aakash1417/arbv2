@@ -42,7 +42,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { Builder, By } = require('selenium-webdriver');
+const { Builder } = require('selenium-webdriver');
 const chrome = require('selenium-webdriver/chrome');
 const dom = require('./bet365-dom');
 const { canonicalLeague } = require('../src/normalize');
@@ -51,8 +51,6 @@ const { parseCouponTime } = require('../src/books/bet365');
 const LOGIN_URL = 'https://www.ab.bet365.ca/';
 const COUPON_URL = 'https://www.ab.bet365.ca/#/AC/B151/C1/D50/E3/F163/';
 const SNAPSHOT = path.join(__dirname, '..', 'data', 'bet365.json');
-const FIXTURE_SEL = '.ses-ParticipantFixtureDetailsEsports_TeamNames';
-
 /** Nested route holding the player-prop tab. */
 const PLAYER_ROUTE = 'I11/';
 
@@ -219,12 +217,11 @@ function localDay(days, now = new Date()) {
   return d;
 }
 
-/** Click a fixture, reacquiring its node if Bet365 rerenders the coupon. */
-async function clickFixture(driver, index, couponUrl) {
+/** Click a fixture, reacquiring its node by team names after any rerender. */
+async function clickFixture(driver, fixture, couponUrl) {
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const els = await driver.findElements(By.css(FIXTURE_SEL));
-    const el = els[index];
+    const el = await driver.executeScript(dom.findCouponFixture, fixture.home, fixture.away);
     if (!el) return false;
     try {
       await driver.executeScript('arguments[0].scrollIntoView({block:"center"});', el);
@@ -242,7 +239,10 @@ async function clickFixture(driver, index, couponUrl) {
 }
 
 async function hasCouponFixtures(driver) {
-  try { return (await driver.findElements(By.css(FIXTURE_SEL))).length > 0; }
+  try {
+    const coupon = await driver.executeScript(dom.readCoupon);
+    return Boolean(coupon && coupon.fixtures && coupon.fixtures.length);
+  }
   catch { return false; }
 }
 
@@ -294,7 +294,7 @@ async function harvestRoutes(driver, fixtures) {
     }
 
     try {
-      if (!await clickFixture(driver, f.index, couponUrl)) continue;
+      if (!await clickFixture(driver, f, couponUrl)) continue;
 
       // A hash-route change is the reliable signal that the click took effect;
       // a fixed sleep is either wasteful or too short on a busy SPA.
